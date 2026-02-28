@@ -302,10 +302,11 @@ pub fn find_ios_simulator_sdk() -> Option<SdkInfo> {
             // iOS simulator arch
             "-arch".to_owned(),
             "arm64".to_owned(),
-            // NOTE: -fmodules causes CXError_ASTReadError (err=4) with Xcode's
-            // libclang — the module compilation pipeline fails silently and
-            // returns a null TU. SDK headers (UIKit, Foundation, etc.) resolve
-            // correctly via -isysroot alone without modules.
+            // Enable Clang modules so @import UIKit (used directly in project .h files)
+            // resolves correctly. Note: -fmodule-cache-path is NOT passed — that flag
+            // is an invalid clang driver argument that causes CXError_ASTReadError (err=4).
+            // -fmodules alone (with the default cache location) works correctly.
+            "-fmodules".to_owned(),
             // Suppress warnings about non-portable Apple-specific pragmas
             "-Wno-unknown-pragmas".to_owned(),
             "-Wno-error".to_owned(),
