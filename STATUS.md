@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（修复 hover F11：移除 `CXTranslationUnit_SkipFunctionBodies`，添加 `-ferror-limit=0`；commit `5437693`）
+> 最后更新：2026-02-28（修复 F12：percent-decode file:// URI，解决带 `+` 文件名的 hover/goto-def 失效；commit `0745ca5`）
 
 ---
 
@@ -164,6 +164,7 @@ crates/
 | F9 | goto-definition 修复：移除 `-fmodules` 根治 `CXError_ASTReadError`；`.pch` `@import` → `#import` 转换；`UIImage`/`NSString` 现可正确跳转到 SDK .h | ✅ 完成 (`6b24af6`) |
 | F10 | hover 叶节点修复：`tight_cursor_at()` 用 `clang_tokenize`+`clang_annotateTokens` 获取 token 级 cursor，消除 `@implementation` 块中 hover 显示 `ObjCImplementationDecl` 而非实际符号的问题；增加容器体守卫 | ✅ 完成 (`1905dba`) |
 | F11 | hover 方法体修复：移除 `CXTranslationUnit_SkipFunctionBodies` 使 clang 完整解析方法体 AST；添加 `-ferror-limit=0` 防止第三方头文件缺失导致提前终止解析 | ✅ 完成 (`5437693`) |
+| F12 | URI percent-decode 修复：`uri_to_path()` 增加 `%2B` 等百分号编码解码，解决含 `+` 的 ObjC Category 文件（如 `MyClass+CategoryName.h`）hover 和 goto-definition 完全失效的问题 | ✅ 完成 (`0745ca5`) |
 
 ### 修复详情
 
@@ -177,3 +178,4 @@ crates/
 - **goto-definition 根因（F9）**：`-fmodules` 旗标导致 Xcode 的 libclang 返回 `CXError_ASTReadError`（err=4），`CXTranslationUnit` 为 null，所有跳转操作均失败。实际上 SDK 头文件（UIKit、Foundation 等）通过 `-isysroot` 即可正确解析，无需 modules。此外，当 `.pch` 前缀头包含 `@import UIKit` 时，无 `-fmodules` 情况下解析失败；通过新增 `convert_at_imports()` 辅助函数将 `@import Foo;` 转换为 `#import <Foo/Foo.h>`，并将 `.pch` 内容复制到 `/tmp/objc-lsp-headers/prefix_header_src.h`（`.h` 扩展名）供 libclang 以普通源文本而非预编译 PCH 处理。修复后 `UIImage` → `UIImage.h:77:12`、`NSString` → `NSString.h:103:12` 跳转正常。
 - **hover 叶节点根因（F10）**：`clang_getCursor` 返回最内层**包含**光标的 AST 节点，在 `@implementation` 方法体内部该节点是 `ObjCImplementationDecl`，而非实际被悬停的变量/方法引用。**修复**：新增 `tight_cursor_at()` 函数，以目标列号为中心 tokenize 单行小范围，调用 `clang_annotateTokens` 将每个 token 映射到其叶级 AST cursor，找到覆盖目标列的 token 并返回对应 cursor。同时增加容器体守卫：若解析后 cursor kind 仍为 `ObjCImplementationDecl | ObjCCategoryImplDecl | TranslationUnit`，则返回 `None`（不显示悬停）。
 - **hover 方法体修复根因（F11）**：`CXTranslationUnit_SkipFunctionBodies` 旧旗标指示 clang 跳过所有方法体的解析（加速索引用途），导致 `@implementation` 内部完全没有 AST 节点 —— `clang_getCursor` 对方法体内任意位置均返回 `ObjCImplementationDecl`。另一个加剧因素：缺失第三方头文件时 clang 遇到第一个 fatal error 就停止解析，使 AST 更加不完整。**修复 A**：从 `index.rs` 移除 `CXTranslationUnit_SkipFunctionBodies` 旗标，允许 clang 完整解析方法体，使局部变量、属性访问、方法调用的 cursor 均可被正确解析。**修复 B**：`find_ios_simulator_sdk()` 和 `find_macos_sdk()` 均添加 `-ferror-limit=0`，防止第一个 "file not found" fatal error 中断后续解析，在缺少第三方 Pod 头文件时也能尽量生成完整 AST。
+- **URI percent-decode 根因（F12）**：VS Code 在构造 `file://` URI 时将文件名中的 `+` 编码为 `%2B`（标准 URI 规范行为）。旧 `uri_to_path()` 仅做 `strip_prefix("file://")` 而不解码，导致传给 `clang_getFile()` 的路径包含字面 `%2B`，磁盘上不存在该路径，`clang_getFile()` 返回 null —— 所有 hover 和 goto-definition 操作均静默失败。**修复**：在 `server.rs` 中新增 `percent_decode()` / `hex_val()` 辅助函数，对 `file://` 路径部分做完整 `%XX` 解码（`%2B` → `+`，`%20` → 空格等），使 ObjC category 文件（如 `MyClass+CategoryName.h/.m`）的所有 LSP 功能恢复正常。
