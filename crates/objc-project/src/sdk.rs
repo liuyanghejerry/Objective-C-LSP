@@ -195,8 +195,32 @@ pub fn workspace_include_flags(workspace_root: Option<&std::path::Path>) -> Vec<
         // headers that rely on globally-imported UIKit / Foundation types
         // (injected by Xcode via GCC_PREFIX_HEADER) resolve correctly.
         if let Some(pch) = find_prefix_header(root) {
+            // libclang treats `-include <file.pch>` as a pre-compiled binary PCH,
+            // causing CXError_ASTReadError (4). Work around by copying the source
+            // text to a `.h` file so clang treats it as normal source text.
+            let include_path = if pch.extension().and_then(|e| e.to_str()) == Some("pch") {
+                // Write to a stable path in our temp headers area, converting
+                // `@import Foo` to `#import <Foo/Foo.h>` so the prefix header
+                // works without -fmodules.
+                let dest = std::env::temp_dir()
+                    .join("objc-lsp-headers")
+                    .join("prefix_header_src.h");
+                if let Ok(text) = std::fs::read_to_string(&pch) {
+                    let converted = convert_at_imports(&text);
+                    let _ = std::fs::create_dir_all(dest.parent().unwrap());
+                    if std::fs::write(&dest, &converted).is_ok() {
+                        dest
+                    } else {
+                        pch
+                    }
+                } else {
+                    pch
+                }
+            } else {
+                pch
+            };
             flags.push("-include".to_owned());
-            flags.push(pch.to_string_lossy().into_owned());
+            flags.push(include_path.to_string_lossy().into_owned());
         }
     }
 
@@ -278,15 +302,10 @@ pub fn find_ios_simulator_sdk() -> Option<SdkInfo> {
             // iOS simulator arch
             "-arch".to_owned(),
             "arm64".to_owned(),
-            // Enable Clang modules so system types like UIViewController resolve
-            // without an explicit #import <UIKit/UIKit.h> in every header.
-            // This matches Xcode's default CLANG_ENABLE_MODULES = YES behaviour.
-            "-fmodules".to_owned(),
-            "-fmodule-cache-path".to_owned(),
-            std::env::temp_dir()
-                .join("objc-lsp-module-cache")
-                .to_string_lossy()
-                .into_owned(),
+            // NOTE: -fmodules causes CXError_ASTReadError (err=4) with Xcode's
+            // libclang — the module compilation pipeline fails silently and
+            // returns a null TU. SDK headers (UIKit, Foundation, etc.) resolve
+            // correctly via -isysroot alone without modules.
             // Suppress warnings about non-portable Apple-specific pragmas
             "-Wno-unknown-pragmas".to_owned(),
             "-Wno-error".to_owned(),
@@ -408,6 +427,26 @@ fn find_pch_recursive(
         }
     }
     None
+}
+
+/// Convert `@import Foo;` and `@import Foo.Bar;` lines to `#import <Foo/Foo.h>`
+/// so the prefix header works without `-fmodules`.
+fn convert_at_imports(src: &str) -> String {
+    src.lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("@import ") {
+                // rest looks like "UIKit;" or "Foundation;" or "Foo.Bar;"
+                let module = rest.trim_end_matches(';');
+                // Take the top-level framework name (before any `.`)
+                let framework = module.split('.').next().unwrap_or(module);
+                format!("#import <{framework}/{framework}.h>")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Return `-I` flags for CocoaPods public headers.
