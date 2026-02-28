@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（修复 hover：`tight_cursor_at()` 用 token 注解获取叶节点 cursor，消除 `@implementation` 块中 hover 显示错误信息；commit `TBD`）
+> 最后更新：2026-02-28（修复 hover：`tight_cursor_at()` 用 token 注解获取叶节点 cursor，消除 `@implementation` 块中 hover 显示错误信息；commit `1905dba`）
 
 ---
 
@@ -162,7 +162,7 @@ crates/
 | F7 | UIKit 类型识别（UIViewController 等）：`-fmodules` + 项目前缀头（`.pch`）注入 | ✅ 完成 (`5dbf267`) |
 | F8 | 富化 SDK 符号 hover：继承链/协议列表/方法签名/@property 属性 + 物理头注释回退 | ✅ 完成 (`33aae60`) |
 | F9 | goto-definition 修复：移除 `-fmodules` 根治 `CXError_ASTReadError`；`.pch` `@import` → `#import` 转换；`UIImage`/`NSString` 现可正确跳转到 SDK .h | ✅ 完成 (`6b24af6`) |
-| F10 | hover 叶节点修复：`tight_cursor_at()` 用 `clang_tokenize`+`clang_annotateTokens` 获取 token 级 cursor，消除 `@implementation` 块中 hover 显示 `ObjCImplementationDecl` 而非实际符号的问题；增加容器体守卫 | ✅ 完成 (`TBD`) |
+| F10 | hover 叶节点修复：`tight_cursor_at()` 用 `clang_tokenize`+`clang_annotateTokens` 获取 token 级 cursor，消除 `@implementation` 块中 hover 显示 `ObjCImplementationDecl` 而非实际符号的问题；增加容器体守卫 | ✅ 完成 (`1905dba`) |
 
 ### 修复详情
 
