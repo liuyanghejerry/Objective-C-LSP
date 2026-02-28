@@ -35,6 +35,27 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "objc-lsp-explorer",
+          "title": "Objective-C",
+          "icon": "$(symbol-class)"
+        }
+      ]
+    },
+    "views": {
+      "objc-lsp-explorer": [
+        {
+          "id": "objcSymbolsOutline",
+          "name": "Symbols Outline"
+        },
+        {
+          "id": "objcClassBrowser",
+          "name": "Class Browser"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "objective-c",
@@ -139,6 +160,14 @@
       {
         "command": "objc-lsp.extractMethod",
         "title": "ObjC: Extract Method"
+      },
+      {
+        "command": "objc-lsp.refreshClassBrowser",
+        "title": "ObjC: Refresh Class Browser"
+      },
+      {
+        "command": "objc-lsp.showCallGraph",
+        "title": "ObjC: Show Call Graph"
       }
     ],
     "snippets": [
