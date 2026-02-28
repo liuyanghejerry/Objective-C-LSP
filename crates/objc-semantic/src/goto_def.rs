@@ -7,6 +7,7 @@ use anyhow::Result;
 use clang_sys::*;
 use lsp_types::{GotoDefinitionResponse, Location, Position, Range, Uri};
 
+use crate::crash_guard::with_crash_guard;
 use crate::index::ClangIndex;
 
 impl ClangIndex {
@@ -19,33 +20,37 @@ impl ClangIndex {
         path: &Path,
         pos: Position,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        let units = self.units.lock().unwrap();
-        let tu = match units.get(path) {
-            Some(tu) => *tu,
-            None => return Ok(None),
+        let tu = {
+            let units = self.units.lock().unwrap();
+            match units.get(path) {
+                Some(tu) => *tu,
+                None => return Ok(None),
+            }
         };
 
-        let path_cstr = path_to_cstr(path);
-        let location = unsafe {
-            clang_getLocation(
-                tu,
-                clang_getFile(tu, path_cstr.as_ptr()),
-                pos.line + 1,
-                pos.character + 1,
-            )
-        };
+        with_crash_guard(|| {
+            let path_cstr = path_to_cstr(path);
+            let location = unsafe {
+                clang_getLocation(
+                    tu,
+                    clang_getFile(tu, path_cstr.as_ptr()),
+                    pos.line + 1,
+                    pos.character + 1,
+                )
+            };
 
-        let cursor = unsafe { clang_getCursor(tu, location) };
-        if unsafe { clang_Cursor_isNull(cursor) } != 0 {
-            return Ok(None);
-        }
+            let cursor = unsafe { clang_getCursor(tu, location) };
+            if unsafe { clang_Cursor_isNull(cursor) } != 0 {
+                return Ok(None);
+            }
 
-        let def_cursor = unsafe { clang_getCursorDefinition(cursor) };
-        if unsafe { clang_Cursor_isNull(def_cursor) } != 0 {
-            return Ok(None);
-        }
+            let def_cursor = unsafe { clang_getCursorDefinition(cursor) };
+            if unsafe { clang_Cursor_isNull(def_cursor) } != 0 {
+                return Ok(None);
+            }
 
-        cursor_to_location(def_cursor).map(|loc| loc.map(GotoDefinitionResponse::Scalar))
+            cursor_to_location(def_cursor).map(|loc| loc.map(GotoDefinitionResponse::Scalar))
+        })
     }
 
     /// Return the declaration location for the symbol under the cursor.
@@ -57,42 +62,41 @@ impl ClangIndex {
         path: &Path,
         pos: Position,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        let units = self.units.lock().unwrap();
-        let tu = match units.get(path) {
-            Some(tu) => *tu,
-            None => return Ok(None),
+        let tu = {
+            let units = self.units.lock().unwrap();
+            match units.get(path) {
+                Some(tu) => *tu,
+                None => return Ok(None),
+            }
         };
 
-        let path_cstr = path_to_cstr(path);
-        let location = unsafe {
-            clang_getLocation(
-                tu,
-                clang_getFile(tu, path_cstr.as_ptr()),
-                pos.line + 1,
-                pos.character + 1,
-            )
-        };
+        with_crash_guard(|| {
+            let path_cstr = path_to_cstr(path);
+            let location = unsafe {
+                clang_getLocation(
+                    tu,
+                    clang_getFile(tu, path_cstr.as_ptr()),
+                    pos.line + 1,
+                    pos.character + 1,
+                )
+            };
 
-        let cursor = unsafe { clang_getCursor(tu, location) };
-        if unsafe { clang_Cursor_isNull(cursor) } != 0 {
-            return Ok(None);
-        }
+            let cursor = unsafe { clang_getCursor(tu, location) };
+            if unsafe { clang_Cursor_isNull(cursor) } != 0 {
+                return Ok(None);
+            }
 
-        // `clang_getCursorReferenced` gives the canonical declaration.
-        let decl_cursor = unsafe { clang_getCursorReferenced(cursor) };
-        if unsafe { clang_Cursor_isNull(decl_cursor) } != 0 {
-            return Ok(None);
-        }
+            // `clang_getCursorReferenced` gives the canonical declaration.
+            let decl_cursor = unsafe { clang_getCursorReferenced(cursor) };
+            if unsafe { clang_Cursor_isNull(decl_cursor) } != 0 {
+                return Ok(None);
+            }
 
-        cursor_to_location(decl_cursor).map(|loc| loc.map(GotoDefinitionResponse::Scalar))
-    }
+            cursor_to_location(decl_cursor).map(|loc| loc.map(GotoDefinitionResponse::Scalar))
+        })
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Convert a cursor's source location to an LSP `Location`.
+}
 fn cursor_to_location(cursor: CXCursor) -> Result<Option<Location>> {
     let extent = unsafe { clang_getCursorExtent(cursor) };
     let start = unsafe { clang_getRangeStart(extent) };

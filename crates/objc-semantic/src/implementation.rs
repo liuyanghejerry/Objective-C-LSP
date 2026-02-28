@@ -13,8 +13,8 @@ use anyhow::Result;
 use clang_sys::*;
 use lsp_types::{Location, Position, Range, Uri};
 
+use crate::crash_guard::with_crash_guard;
 use crate::index::ClangIndex;
-
 impl ClangIndex {
     /// Find implementation locations for the symbol at `pos`.
     ///
@@ -22,54 +22,52 @@ impl ClangIndex {
     /// - `@protocol Foo` → all `@interface X <Foo>` declarations
     /// - method declaration → the method definition in `@implementation`
     pub fn implementations_of(&self, path: &Path, pos: Position) -> Result<Vec<Location>> {
-        let units = self.units.lock().unwrap();
-        let tu = match units.get(path) {
-            Some(tu) => *tu,
-            None => return Ok(vec![]),
-        };
-
-        let path_cstr = path_to_cstr(path);
-        let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
-        let loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
-        let cursor = unsafe { clang_getCursor(tu, loc) };
-        if unsafe { clang_Cursor_isNull(cursor) } != 0 {
-            return Ok(vec![]);
-        }
-
-        // Canonicalize.
-        let referenced = unsafe { clang_getCursorReferenced(cursor) };
-        let target = if unsafe { clang_Cursor_isNull(referenced) } != 0 {
-            cursor
-        } else {
-            referenced
-        };
-
-        let kind = unsafe { clang_getCursorKind(target) };
-
-        match kind {
-            CXCursor_ObjCProtocolDecl => find_protocol_implementors(tu, target),
-            CXCursor_ObjCInstanceMethodDecl | CXCursor_ObjCClassMethodDecl => {
-                find_method_definition(tu, target)
+        let tu = {
+            let units = self.units.lock().unwrap();
+            match units.get(path) {
+                Some(tu) => *tu,
+                None => return Ok(vec![]),
             }
-            _ => {
-                // For anything else, fall back to the canonical definition.
-                let def = unsafe { clang_getCursorDefinition(target) };
-                if unsafe { clang_Cursor_isNull(def) } != 0 {
-                    Ok(vec![])
-                } else {
-                    Ok(cursor_to_location(def).into_iter().collect())
+        };
+
+        with_crash_guard(|| {
+            let path_cstr = path_to_cstr(path);
+            let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
+            let loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
+            let cursor = unsafe { clang_getCursor(tu, loc) };
+            if unsafe { clang_Cursor_isNull(cursor) } != 0 {
+                return Ok(vec![]);
+            }
+
+            // Canonicalize.
+            let referenced = unsafe { clang_getCursorReferenced(cursor) };
+            let target = if unsafe { clang_Cursor_isNull(referenced) } != 0 {
+                cursor
+            } else {
+                referenced
+            };
+
+            let kind = unsafe { clang_getCursorKind(target) };
+
+            match kind {
+                CXCursor_ObjCProtocolDecl => find_protocol_implementors(tu, target),
+                CXCursor_ObjCInstanceMethodDecl | CXCursor_ObjCClassMethodDecl => {
+                    find_method_definition(tu, target)
+                }
+                _ => {
+                    // For anything else, fall back to the canonical definition.
+                    let def = unsafe { clang_getCursorDefinition(target) };
+                    if unsafe { clang_Cursor_isNull(def) } != 0 {
+                        Ok(vec![])
+                    } else {
+                        Ok(cursor_to_location(def).into_iter().collect())
+                    }
                 }
             }
-        }
-    }
+        })
 }
 
-// ---------------------------------------------------------------------------
-// Protocol implementors
-// ---------------------------------------------------------------------------
-
-/// Find all `@interface` declarations that list the given protocol in their
-/// conformance list (`@interface Foo <ProtocolName>`).
+}
 fn find_protocol_implementors(
     tu: CXTranslationUnit,
     proto_cursor: CXCursor,

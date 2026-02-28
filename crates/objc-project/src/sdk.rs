@@ -161,6 +161,13 @@ pub fn default_include_flags() -> Vec<String> {
 pub fn workspace_include_flags(workspace_root: Option<&std::path::Path>) -> Vec<String> {
     let mut flags = Vec::new();
 
+    // Always inject the clang built-in resource dir first so that stdarg.h,
+    // stdbool.h, etc. are found regardless of the active SDK.
+    if let Some(res_dir) = find_clang_resource_dir() {
+        flags.push("-resource-dir".to_owned());
+        flags.push(res_dir);
+    }
+
     // Detect iOS vs macOS from Podfile / xcodeproj.
     let is_ios = workspace_root.map(detect_ios_project).unwrap_or(false);
 
@@ -195,6 +202,46 @@ pub fn workspace_include_flags(workspace_root: Option<&std::path::Path>) -> Vec<
         flags.extend(cocoapods_flags(root));
     }
     flags
+}
+
+/// Detect the clang resource directory that should be passed as `-resource-dir`.
+/// This is needed so that libclang can find its own built-in headers
+/// (e.g. `stdarg.h`, `stdbool.h`) even when the SDK sysroot doesn't include them.
+///
+/// Detection priority:
+/// 1. `clang --print-resource-dir` via xcrun (picks up Xcode's bundled clang)
+/// 2. Well-known Xcode toolchain path (hardcoded fallback)
+#[cfg(target_os = "macos")]
+pub fn find_clang_resource_dir() -> Option<String> {
+    // Strategy 1: ask xcrun / clang directly.
+    let output = std::process::Command::new("xcrun")
+        .args(["clang", "--print-resource-dir"])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let path = String::from_utf8(output.stdout).ok()?;
+        let path = path.trim().to_owned();
+        if !path.is_empty() && std::path::Path::new(&path).exists() {
+            return Some(path);
+        }
+    }
+
+    // Strategy 2: well-known Xcode toolchain path.
+    let candidates = [
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/17.0.0",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/17",
+    ];
+    for c in &candidates {
+        if std::path::Path::new(c).exists() {
+            return Some(c.to_string());
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn find_clang_resource_dir() -> Option<String> {
+    None
 }
 
 /// Attempt to locate the iPhone Simulator SDK via `xcrun`.

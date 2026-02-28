@@ -7,8 +7,8 @@ use anyhow::Result;
 use clang_sys::*;
 use lsp_types::{CompletionItem, CompletionItemKind, Documentation, InsertTextFormat, Position};
 
+use crate::crash_guard::with_crash_guard;
 use crate::index::ClangIndex;
-
 impl ClangIndex {
     /// Request completions at `pos` in `file`.
     ///
@@ -20,63 +20,65 @@ impl ClangIndex {
         pos: Position,
         unsaved_content: Option<&str>,
     ) -> Result<Vec<CompletionItem>> {
-        use std::mem::MaybeUninit;
-
         let path_cstr =
             CString::new(path.to_string_lossy().as_ref()).map_err(|e| anyhow::anyhow!("{e}"))?;
 
         // Build unsaved files array.
-        let unsaved_buf;
-        let (unsaved_ptr, unsaved_len) = if let Some(content) = unsaved_content {
-            unsaved_buf = CXUnsavedFile {
-                Filename: path_cstr.as_ptr(),
-                Contents: content.as_ptr() as *const i8,
-                Length: content.len() as u64,
-            };
-            (&unsaved_buf as *const _ as *mut _, 1u32)
-        } else {
-            (std::ptr::null_mut(), 0u32)
-        };
+        let unsaved_content_owned: Option<String> = unsaved_content.map(|s| s.to_owned());
 
-        // Clang lines/columns are 1-based.
-        let results = unsafe {
-            clang_codeCompleteAt(
-                // We need to re-parse for completion; use the cached TU's index.
-                // For now, pass a fresh parse via the index pointer.
-                // A production implementation would use clang_reparseTranslationUnit.
-                {
-                    let units = self.units.lock().unwrap();
-                    match units.get(path) {
-                        Some(&tu) => tu,
-                        None => return Ok(Vec::new()),
-                    }
-                },
-                path_cstr.as_ptr(),
-                pos.line + 1,
-                pos.character + 1,
-                unsaved_ptr,
-                unsaved_len,
-                CXCodeComplete_IncludeCodePatterns | CXCodeComplete_IncludeBriefComments,
-            )
-        };
-
-        if results.is_null() {
-            return Ok(Vec::new());
-        }
-
-        let num = unsafe { (*results).NumResults };
-        let mut items = Vec::with_capacity(num as usize);
-
-        for i in 0..num {
-            let result = unsafe { &(*(*results).Results.add(i as usize)) };
-            if let Some(item) = cx_completion_to_lsp(result) {
-                items.push(item);
+        // Extract TU without holding the lock during clang calls.
+        let tu = {
+            let units = self.units.lock().unwrap();
+            match units.get(path) {
+                Some(&tu) => tu,
+                None => return Ok(Vec::new()),
             }
-        }
+        };
 
-        unsafe { clang_disposeCodeCompleteResults(results) };
-        Ok(items)
-    }
+        with_crash_guard(move || {
+            // Clang lines/columns are 1-based.
+            let unsaved_buf;
+            let (unsaved_ptr, unsaved_len) = if let Some(ref content) = unsaved_content_owned {
+                unsaved_buf = CXUnsavedFile {
+                    Filename: path_cstr.as_ptr(),
+                    Contents: content.as_ptr() as *const i8,
+                    Length: content.len() as u64,
+                };
+                (&unsaved_buf as *const _ as *mut _, 1u32)
+            } else {
+                (std::ptr::null_mut(), 0u32)
+            };
+
+            let results = unsafe {
+                clang_codeCompleteAt(
+                    tu,
+                    path_cstr.as_ptr(),
+                    pos.line + 1,
+                    pos.character + 1,
+                    unsaved_ptr,
+                    unsaved_len,
+                    CXCodeComplete_IncludeCodePatterns | CXCodeComplete_IncludeBriefComments,
+                )
+            };
+
+            if results.is_null() {
+                return Ok(Vec::new());
+            }
+
+            let num = unsafe { (*results).NumResults };
+            let mut items = Vec::with_capacity(num as usize);
+
+            for i in 0..num {
+                let result = unsafe { &(*(*results).Results.add(i as usize)) };
+                if let Some(item) = cx_completion_to_lsp(result) {
+                    items.push(item);
+                }
+            }
+
+            unsafe { clang_disposeCodeCompleteResults(results) };
+            Ok(items)
+        })
+}
 }
 
 fn cx_completion_to_lsp(result: &CXCompletionResult) -> Option<CompletionItem> {

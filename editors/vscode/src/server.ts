@@ -32,9 +32,9 @@ export async function startClient(
       env: {
         ...process.env,
         // Ensure dyld can resolve libclang.dylib at runtime.
-        // libclang's install name uses @@HOMEBREW_PREFIX@@ which dyld
-        // cannot resolve without DYLD_LIBRARY_PATH being set explicitly.
-        DYLD_LIBRARY_PATH: `/opt/homebrew/opt/llvm/lib:/opt/homebrew/lib${process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : ''}`,
+        // Using Xcode's bundled libclang (Apple clang 17) which correctly
+        // handles iOS 26.2 / macOS 26 SDKs. Homebrew LLVM 22 conflicts.
+        DYLD_LIBRARY_PATH: `/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib${process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : ''}`,
       },
     },
   };

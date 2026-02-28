@@ -21,8 +21,8 @@ use anyhow::Result;
 use clang_sys::*;
 use lsp_types::{Position, PrepareRenameResponse, Range, TextEdit, Uri, WorkspaceEdit};
 
+use crate::crash_guard::with_crash_guard;
 use crate::index::ClangIndex;
-
 impl ClangIndex {
     /// Check whether the symbol at `pos` can be renamed.
     ///
@@ -33,41 +33,45 @@ impl ClangIndex {
         path: &Path,
         pos: Position,
     ) -> Result<Option<PrepareRenameResponse>> {
-        let units = self.units.lock().unwrap();
-        let tu = match units.get(path) {
-            Some(tu) => *tu,
-            None => return Ok(None),
+        let tu = {
+            let units = self.units.lock().unwrap();
+            match units.get(path) {
+                Some(tu) => *tu,
+                None => return Ok(None),
+            }
         };
 
-        let path_cstr = path_to_cstr(path);
-        let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
-        let loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
-        let cursor = unsafe { clang_getCursor(tu, loc) };
-        if unsafe { clang_Cursor_isNull(cursor) } != 0 {
-            return Ok(None);
-        }
+        with_crash_guard(|| {
+            let path_cstr = path_to_cstr(path);
+            let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
+            let loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
+            let cursor = unsafe { clang_getCursor(tu, loc) };
+            if unsafe { clang_Cursor_isNull(cursor) } != 0 {
+                return Ok(None);
+            }
 
-        let kind = unsafe { clang_getCursorKind(cursor) };
+            let kind = unsafe { clang_getCursorKind(cursor) };
 
-        // Only allow renaming properties, methods, ivars, and plain variables/functions.
-        let renameable = matches!(
-            kind,
-            CXCursor_ObjCPropertyDecl
-                | CXCursor_ObjCInstanceMethodDecl
-                | CXCursor_ObjCClassMethodDecl
-                | CXCursor_ObjCIvarDecl
-                | CXCursor_VarDecl
-                | CXCursor_FunctionDecl
-                | CXCursor_TypedefDecl
-        );
+            // Only allow renaming properties, methods, ivars, and plain variables/functions.
+            let renameable = matches!(
+                kind,
+                CXCursor_ObjCPropertyDecl
+                    | CXCursor_ObjCInstanceMethodDecl
+                    | CXCursor_ObjCClassMethodDecl
+                    | CXCursor_ObjCIvarDecl
+                    | CXCursor_VarDecl
+                    | CXCursor_FunctionDecl
+                    | CXCursor_TypedefDecl
+            );
 
-        if !renameable {
-            return Ok(None);
-        }
+            if !renameable {
+                return Ok(None);
+            }
 
-        let extent = unsafe { clang_getCursorExtent(cursor) };
-        let range = cx_range_to_lsp(extent);
-        Ok(Some(PrepareRenameResponse::Range(range)))
+            let extent = unsafe { clang_getCursorExtent(cursor) };
+            let range = cx_range_to_lsp(extent);
+            Ok(Some(PrepareRenameResponse::Range(range)))
+        })
     }
 
     /// Rename all occurrences of the symbol at `pos` to `new_name`.
@@ -80,86 +84,90 @@ impl ClangIndex {
         pos: Position,
         new_name: &str,
     ) -> Result<Option<WorkspaceEdit>> {
-        let units = self.units.lock().unwrap();
-        let tu = match units.get(path) {
-            Some(tu) => *tu,
-            None => return Ok(None),
+        let tu = {
+            let units = self.units.lock().unwrap();
+            match units.get(path) {
+                Some(tu) => *tu,
+                None => return Ok(None),
+            }
         };
 
-        let path_cstr = path_to_cstr(path);
-        let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
-        let loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
-        let cursor = unsafe { clang_getCursor(tu, loc) };
-        if unsafe { clang_Cursor_isNull(cursor) } != 0 {
-            return Ok(None);
-        }
+        with_crash_guard(|| {
+            let path_cstr = path_to_cstr(path);
+            let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
+            let loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
+            let cursor = unsafe { clang_getCursor(tu, loc) };
+            if unsafe { clang_Cursor_isNull(cursor) } != 0 {
+                return Ok(None);
+            }
 
-        // Canonicalize to the referenced / definition cursor.
-        let referenced = unsafe { clang_getCursorReferenced(cursor) };
-        let target = if unsafe { clang_Cursor_isNull(referenced) } != 0 {
-            cursor
-        } else {
-            referenced
-        };
-
-        let kind = unsafe { clang_getCursorKind(target) };
-
-        // For @property, compute all derived names.
-        let is_property = kind == CXCursor_ObjCPropertyDecl;
-        let old_name = cx_string_owned(unsafe { clang_getCursorSpelling(target) });
-
-        // Collect raw reference locations.
-        let mut raw_refs: Vec<(CXCursor, CXSourceRange)> = Vec::new();
-        let visitor = CXCursorAndRangeVisitor {
-            context: &mut raw_refs as *mut Vec<(CXCursor, CXSourceRange)> as *mut _,
-            visit: Some(visit_with_cursor),
-        };
-        unsafe { clang_findReferencesInFile(target, cx_file, visitor) };
-
-        // Build LSP edits.
-        let uri: Uri = format!("file://{}", path.to_string_lossy())
-            .parse()
-            .map_err(|e| anyhow::anyhow!("bad URI: {e}"))?;
-
-        let mut edits: Vec<TextEdit> = Vec::new();
-
-        for (ref_cursor, ref_range) in &raw_refs {
-            let ref_kind = unsafe { clang_getCursorKind(*ref_cursor) };
-            let replacement = if is_property {
-                // Derive appropriate replacement based on the reference kind.
-                derive_property_replacement(&old_name, new_name, ref_kind)
+            // Canonicalize to the referenced / definition cursor.
+            let referenced = unsafe { clang_getCursorReferenced(cursor) };
+            let target = if unsafe { clang_Cursor_isNull(referenced) } != 0 {
+                cursor
             } else {
-                new_name.to_owned()
+                referenced
             };
 
-            // Only rewrite the "name" portion, not the full extent.
-            // Use the spelling location for precision.
-            let start = unsafe { clang_getRangeStart(*ref_range) };
-            let end = unsafe { clang_getRangeEnd(*ref_range) };
+            let kind = unsafe { clang_getCursorKind(target) };
 
-            let start_pos = spelling_pos(start);
-            let end_pos = spelling_pos(end);
+            // For @property, compute all derived names.
+            let is_property = kind == CXCursor_ObjCPropertyDecl;
+            let old_name = cx_string_owned(unsafe { clang_getCursorSpelling(target) });
 
-            edits.push(TextEdit {
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                new_text: replacement,
-            });
-        }
+            // Collect raw reference locations.
+            let mut raw_refs: Vec<(CXCursor, CXSourceRange)> = Vec::new();
+            let visitor = CXCursorAndRangeVisitor {
+                context: &mut raw_refs as *mut Vec<(CXCursor, CXSourceRange)> as *mut _,
+                visit: Some(visit_with_cursor),
+            };
+            unsafe { clang_findReferencesInFile(target, cx_file, visitor) };
 
-        if edits.is_empty() {
-            return Ok(None);
-        }
+            // Build LSP edits.
+            let uri: Uri = format!("file://{}", path.to_string_lossy())
+                .parse()
+                .map_err(|e| anyhow::anyhow!("bad URI: {e}"))?;
 
-        let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
-        changes.insert(uri, edits);
+            let mut edits: Vec<TextEdit> = Vec::new();
 
-        Ok(Some(WorkspaceEdit {
-            changes: Some(changes),
-            ..Default::default()
-        }))
+            for (ref_cursor, ref_range) in &raw_refs {
+                let ref_kind = unsafe { clang_getCursorKind(*ref_cursor) };
+                let replacement = if is_property {
+                    // Derive appropriate replacement based on the reference kind.
+                    derive_property_replacement(&old_name, new_name, ref_kind)
+                } else {
+                    new_name.to_owned()
+                };
+
+                // Only rewrite the "name" portion, not the full extent.
+                // Use the spelling location for precision.
+                let start = unsafe { clang_getRangeStart(*ref_range) };
+                let end = unsafe { clang_getRangeEnd(*ref_range) };
+
+                let start_pos = spelling_pos(start);
+                let end_pos = spelling_pos(end);
+
+                edits.push(TextEdit {
+                    range: Range {
+                        start: start_pos,
+                        end: end_pos,
+                    },
+                    new_text: replacement,
+                });
+            }
+
+            if edits.is_empty() {
+                return Ok(None);
+            }
+
+            let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
+            changes.insert(uri, edits);
+
+            Ok(Some(WorkspaceEdit {
+                changes: Some(changes),
+                ..Default::default()
+            }))
+        })
     }
     /// Rename across all currently-parsed translation units.
     ///
@@ -172,123 +180,120 @@ impl ClangIndex {
         pos: Position,
         new_name: &str,
     ) -> Result<Option<WorkspaceEdit>> {
-        let units = self.units.lock().unwrap();
-        let primary_tu = match units.get(path) {
-            Some(tu) => *tu,
-            None => return Ok(None),
+        // Extract TU pointer and full TU list without holding the lock.
+        let (primary_tu, all_tus) = {
+            let units = self.units.lock().unwrap();
+            let primary_tu = match units.get(path) {
+                Some(tu) => *tu,
+                None => return Ok(None),
+            };
+            let all_tus: Vec<(std::path::PathBuf, CXTranslationUnit)> =
+                units.iter().map(|(p, tu)| (p.clone(), *tu)).collect();
+            (primary_tu, all_tus)
         };
 
-        // Resolve target cursor from primary file.
-        let primary_path_cstr = path_to_cstr(path);
-        let cx_primary = unsafe { clang_getFile(primary_tu, primary_path_cstr.as_ptr()) };
-        let loc = unsafe { clang_getLocation(primary_tu, cx_primary, pos.line + 1, pos.character + 1) };
-        let cursor = unsafe { clang_getCursor(primary_tu, loc) };
-        if unsafe { clang_Cursor_isNull(cursor) } != 0 {
-            return Ok(None);
-        }
-
-        // Canonicalize to definition.
-        let referenced = unsafe { clang_getCursorReferenced(cursor) };
-        let target = if unsafe { clang_Cursor_isNull(referenced) } != 0 {
-            cursor
-        } else {
-            referenced
-        };
-
-        let kind = unsafe { clang_getCursorKind(target) };
-        let is_property = kind == CXCursor_ObjCPropertyDecl;
-        let old_name = cx_string_owned(unsafe { clang_getCursorSpelling(target) });
-
-        // Collect edits across all parsed TUs.
-        let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
-
-        // Collect the list of (path, tu) pairs first to avoid borrow issues.
-        let all_tus: Vec<(std::path::PathBuf, CXTranslationUnit)> =
-            units.iter().map(|(p, tu)| (p.clone(), *tu)).collect();
-        drop(units);  // release the lock before unsafe libclang calls
-
-        for (tu_path, tu) in &all_tus {
-            let tu_path_cstr = path_to_cstr(tu_path);
-            let cx_file = unsafe {
-                clang_getFile(*tu, tu_path_cstr.as_ptr())
-            };
-            if cx_file.is_null() {
-                continue;
+        with_crash_guard(move || {
+            // Resolve target cursor from primary file.
+            let primary_path_cstr = path_to_cstr(path);
+            let cx_primary = unsafe { clang_getFile(primary_tu, primary_path_cstr.as_ptr()) };
+            let loc = unsafe { clang_getLocation(primary_tu, cx_primary, pos.line + 1, pos.character + 1) };
+            let cursor = unsafe { clang_getCursor(primary_tu, loc) };
+            if unsafe { clang_Cursor_isNull(cursor) } != 0 {
+                return Ok(None);
             }
 
-            let mut raw_refs: Vec<(CXCursor, CXSourceRange)> = Vec::new();
-            let visitor = CXCursorAndRangeVisitor {
-                context: &mut raw_refs as *mut Vec<(CXCursor, CXSourceRange)> as *mut _,
-                visit: Some(visit_with_cursor),
+            // Canonicalize to definition.
+            let referenced = unsafe { clang_getCursorReferenced(cursor) };
+            let target = if unsafe { clang_Cursor_isNull(referenced) } != 0 {
+                cursor
+            } else {
+                referenced
             };
-            unsafe { clang_findReferencesInFile(target, cx_file, visitor) };
 
-            for (ref_cursor, ref_range) in &raw_refs {
-                let ref_kind = unsafe { clang_getCursorKind(*ref_cursor) };
-                let replacement = if is_property {
-                    derive_property_replacement(&old_name, new_name, ref_kind)
-                } else {
-                    new_name.to_owned()
+            let kind = unsafe { clang_getCursorKind(target) };
+            let is_property = kind == CXCursor_ObjCPropertyDecl;
+            let old_name = cx_string_owned(unsafe { clang_getCursorSpelling(target) });
+
+            // Collect edits across all parsed TUs.
+            let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
+
+            for (tu_path, tu) in &all_tus {
+                let tu_path_cstr = path_to_cstr(tu_path);
+                let cx_file = unsafe {
+                    clang_getFile(*tu, tu_path_cstr.as_ptr())
                 };
-
-                let start = unsafe { clang_getRangeStart(*ref_range) };
-                let end = unsafe { clang_getRangeEnd(*ref_range) };
-                let start_pos = spelling_pos(start);
-                let end_pos = spelling_pos(end);
-
-                // Determine the file this reference is in.
-                let mut ref_file: CXFile = std::ptr::null_mut();
-                let mut ref_line: u32 = 0;
-                let mut ref_col: u32 = 0;
-                unsafe {
-                    clang_getSpellingLocation(
-                        start,
-                        &mut ref_file,
-                        &mut ref_line,
-                        &mut ref_col,
-                        std::ptr::null_mut(),
-                    );
-                };
-                if ref_file.is_null() {
+                if cx_file.is_null() {
                     continue;
                 }
-                let cx_name = unsafe { clang_getFileName(ref_file) };
-                let file_name = cx_string_owned(cx_name);
-                if file_name.is_empty() {
-                    continue;
-                }
-                let uri: Uri = match format!("file://{file_name}").parse() {
-                    Ok(u) => u,
-                    Err(_) => continue,
-                };
 
-                changes
-                    .entry(uri)
-                    .or_default()
-                    .push(TextEdit {
-                        range: Range { start: start_pos, end: end_pos },
-                        new_text: replacement,
-                    });
+                let mut raw_refs: Vec<(CXCursor, CXSourceRange)> = Vec::new();
+                let visitor = CXCursorAndRangeVisitor {
+                    context: &mut raw_refs as *mut Vec<(CXCursor, CXSourceRange)> as *mut _,
+                    visit: Some(visit_with_cursor),
+                };
+                unsafe { clang_findReferencesInFile(target, cx_file, visitor) };
+
+                for (ref_cursor, ref_range) in &raw_refs {
+                    let ref_kind = unsafe { clang_getCursorKind(*ref_cursor) };
+                    let replacement = if is_property {
+                        derive_property_replacement(&old_name, new_name, ref_kind)
+                    } else {
+                        new_name.to_owned()
+                    };
+
+                    let start = unsafe { clang_getRangeStart(*ref_range) };
+                    let end = unsafe { clang_getRangeEnd(*ref_range) };
+                    let start_pos = spelling_pos(start);
+                    let end_pos = spelling_pos(end);
+
+                    // Determine the file this reference is in.
+                    let mut ref_file: CXFile = std::ptr::null_mut();
+                    let mut ref_line: u32 = 0;
+                    let mut ref_col: u32 = 0;
+                    unsafe {
+                        clang_getSpellingLocation(
+                            start,
+                            &mut ref_file,
+                            &mut ref_line,
+                            &mut ref_col,
+                            std::ptr::null_mut(),
+                        );
+                    };
+                    if ref_file.is_null() {
+                        continue;
+                    }
+                    let cx_name = unsafe { clang_getFileName(ref_file) };
+                    let file_name = cx_string_owned(cx_name);
+                    if file_name.is_empty() {
+                        continue;
+                    }
+                    let uri: Uri = match format!("file://{file_name}").parse() {
+                        Ok(u) => u,
+                        Err(_) => continue,
+                    };
+
+                    changes
+                        .entry(uri)
+                        .or_default()
+                        .push(TextEdit {
+                            range: Range { start: start_pos, end: end_pos },
+                            new_text: replacement,
+                        });
+                }
             }
-        }
 
-        if changes.is_empty() {
-            return Ok(None);
-        }
+            if changes.is_empty() {
+                return Ok(None);
+            }
 
-        Ok(Some(WorkspaceEdit {
-            changes: Some(changes),
-            ..Default::default()
-        }))
-    }
+            Ok(Some(WorkspaceEdit {
+                changes: Some(changes),
+                ..Default::default()
+            }))
+        })
 }
 
-// ---------------------------------------------------------------------------
-// Property rename helpers
-// ---------------------------------------------------------------------------
-
-/// Given the old property name and new name, compute the correct replacement
-/// string for a reference of the given cursor kind.
+}
 fn derive_property_replacement(old: &str, new: &str, kind: CXCursorKind) -> String {
     match kind {
         // The property declaration and dot-syntax access use the bare name.

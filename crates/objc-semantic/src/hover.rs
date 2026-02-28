@@ -7,79 +7,87 @@ use anyhow::Result;
 use clang_sys::*;
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
+use crate::crash_guard::with_crash_guard;
 use crate::index::ClangIndex;
 
 impl ClangIndex {
     /// Return hover information for the given position in a file.
     pub fn hover_at(&self, path: &Path, pos: Position) -> Result<Option<Hover>> {
-        let units = self.units.lock().unwrap();
-        let tu = match units.get(path) {
-            Some(tu) => *tu,
-            None => return Ok(None),
-        };
-
-        // Clang positions are 1-based.
-        let path_cstr = path_to_cstr(path);
-        let location = unsafe {
-            clang_getLocation(
-                tu,
-                clang_getFile(tu, path_cstr.as_ptr()),
-                pos.line + 1,
-                pos.character + 1,
-            )
-        };
-
-        let cursor = unsafe { clang_getCursor(tu, location) };
-        if unsafe { clang_Cursor_isNull(cursor) } != 0 {
-            return Ok(None);
-        }
-
-        // Build a markdown string: type spelling + brief comment.
-        let mut parts: Vec<String> = Vec::new();
-
-        // Cursor kind as readable label.
-        let kind_str = cursor_kind_label(unsafe { clang_getCursorKind(cursor) });
-
-        // Display name (includes selector for ObjC methods).
-        let display = cx_string_owned(unsafe { clang_getCursorDisplayName(cursor) });
-        if !display.is_empty() {
-            parts.push(format!("**{kind_str}** `{display}`"));
-        }
-
-        // Type spelling.
-        let ty = unsafe { clang_getCursorType(cursor) };
-        let ty_str = cx_string_owned(unsafe { clang_getTypeSpelling(ty) });
-        if !ty_str.is_empty() && ty_str != "void" {
-            parts.push(format!("*Type:* `{ty_str}`"));
-        }
-
-        // Brief doc comment from clang (covers Doxygen-style brief).
-        let comment = unsafe { clang_Cursor_getBriefCommentText(cursor) };
-        let comment_str = cx_string_owned(comment);
-        if !comment_str.is_empty() {
-            parts.push(comment_str);
-        } else {
-            // Fall back to the full raw comment text — this covers Apple
-            // HeaderDoc `/*!` blocks and multi-paragraph doc comments.
-            let raw = cx_string_owned(unsafe { clang_Cursor_getRawCommentText(cursor) });
-            let cleaned = clean_raw_comment(&raw);
-            if !cleaned.is_empty() {
-                parts.push(cleaned);
+        // Extract TU pointer without holding the lock during clang calls.
+        // (longjmp past a held Mutex would deadlock.)
+        let tu = {
+            let units = self.units.lock().unwrap();
+            match units.get(path) {
+                Some(tu) => *tu,
+                None => return Ok(None),
             }
-        }
+        };
 
-        if parts.is_empty() {
-            return Ok(None);
-        }
+        with_crash_guard(|| {
+            // Clang positions are 1-based.
+            let path_cstr = path_to_cstr(path);
+            let location = unsafe {
+                clang_getLocation(
+                    tu,
+                    clang_getFile(tu, path_cstr.as_ptr()),
+                    pos.line + 1,
+                    pos.character + 1,
+                )
+            };
 
-        Ok(Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: parts.join("\n\n"),
-            }),
-            range: None,
-        }))
-    }
+            let cursor = unsafe { clang_getCursor(tu, location) };
+            if unsafe { clang_Cursor_isNull(cursor) } != 0 {
+                return Ok(None);
+            }
+
+            // Build a markdown string: type spelling + brief comment.
+            let mut parts: Vec<String> = Vec::new();
+
+            // Cursor kind as readable label.
+            let kind_str = cursor_kind_label(unsafe { clang_getCursorKind(cursor) });
+
+            // Display name (includes selector for ObjC methods).
+            let display = cx_string_owned(unsafe { clang_getCursorDisplayName(cursor) });
+            if !display.is_empty() {
+                parts.push(format!("**{kind_str}** `{display}`"));
+            }
+
+            // Type spelling.
+            let ty = unsafe { clang_getCursorType(cursor) };
+            let ty_str = cx_string_owned(unsafe { clang_getTypeSpelling(ty) });
+            if !ty_str.is_empty() && ty_str != "void" {
+                parts.push(format!("*Type:* `{ty_str}`"));
+            }
+
+            // Brief doc comment from clang (covers Doxygen-style brief).
+            let comment = unsafe { clang_Cursor_getBriefCommentText(cursor) };
+            let comment_str = cx_string_owned(comment);
+            if !comment_str.is_empty() {
+                parts.push(comment_str);
+            } else {
+                // Fall back to the full raw comment text — this covers Apple
+                // HeaderDoc `/*!` blocks and multi-paragraph doc comments.
+                let raw = cx_string_owned(unsafe { clang_Cursor_getRawCommentText(cursor) });
+                let cleaned = clean_raw_comment(&raw);
+                if !cleaned.is_empty() {
+                    parts.push(cleaned);
+                }
+            }
+
+            if parts.is_empty() {
+                return Ok(None);
+            }
+
+            Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: parts.join("\n\n"),
+                }),
+                range: None,
+            }))
+        })
+}
+
 }
 
 fn cursor_kind_label(kind: CXCursorKind) -> &'static str {

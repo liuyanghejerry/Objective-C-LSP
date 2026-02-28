@@ -1,11 +1,11 @@
 # Project-local Cargo configuration
 #
-# Sets environment variables so that clang-sys can find Homebrew LLVM's
-# libclang at both build time and test runtime on macOS (Apple Silicon).
+# Uses Xcode's bundled libclang (Apple clang 17) instead of Homebrew LLVM.
+# Xcode's libclang correctly handles the latest Apple SDKs (iOS 26, macOS 26).
+# Homebrew LLVM 22 has symbol conflicts with Xcode SDKs and crashes on parse.
 #
 # LIBCLANG_PATH  — used by clang-sys's build script to locate libclang.dylib
 # DYLD_LIBRARY_PATH — used by macOS dyld at runtime to load libclang.dylib
-#                     and its dependency libz3.dylib (pulled in by libLLVM)
 #
 # rustflags -rpath — bakes LC_RPATH into the binary so that macOS dyld
 #                     can find libclang.dylib at runtime without any extra
@@ -13,11 +13,10 @@
 #                     the binary directly, outside of a cargo shell).
 
 [env]
-LIBCLANG_PATH = "/opt/homebrew/opt/llvm/lib"
-DYLD_LIBRARY_PATH = "/opt/homebrew/opt/llvm/lib:/opt/homebrew/lib"
+LIBCLANG_PATH = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib"
+DYLD_LIBRARY_PATH = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib"
 
 [build]
 rustflags = [
-  "-C", "link-arg=-Wl,-rpath,/opt/homebrew/opt/llvm/lib",
-  "-C", "link-arg=-Wl,-rpath,/opt/homebrew/lib",
+  "-C", "link-arg=-Wl,-rpath,/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib",
 ]

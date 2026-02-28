@@ -11,8 +11,8 @@ use anyhow::Result;
 use clang_sys::*;
 use lsp_types::{Location, Position, Range, Uri};
 
+use crate::crash_guard::with_crash_guard;
 use crate::index::ClangIndex;
-
 impl ClangIndex {
     /// Find all in-file references to the symbol at `pos` in `path`.
     ///
@@ -25,70 +25,75 @@ impl ClangIndex {
         pos: Position,
         include_declaration: bool,
     ) -> Result<Vec<Location>> {
-        let units = self.units.lock().unwrap();
-        let tu = match units.get(path) {
-            Some(tu) => *tu,
-            None => return Ok(Vec::new()),
+        let tu = {
+            let units = self.units.lock().unwrap();
+            match units.get(path) {
+                Some(tu) => *tu,
+                None => return Ok(Vec::new()),
+            }
         };
 
-        // Resolve the cursor at the requested position.
-        let path_cstr = path_to_cstr(path);
-        let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
-        let source_loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
-        let cursor = unsafe { clang_getCursor(tu, source_loc) };
-        if unsafe { clang_Cursor_isNull(cursor) } != 0 {
-            return Ok(Vec::new());
-        }
+        with_crash_guard(|| {
+            // Resolve the cursor at the requested position.
+            let path_cstr = path_to_cstr(path);
+            let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
+            let source_loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
+            let cursor = unsafe { clang_getCursor(tu, source_loc) };
+            if unsafe { clang_Cursor_isNull(cursor) } != 0 {
+                return Ok(Vec::new());
+            }
 
-        // Canonicalize to the referenced symbol (handles message sends etc.)
-        let referenced = unsafe { clang_getCursorReferenced(cursor) };
-        let target = if unsafe { clang_Cursor_isNull(referenced) } != 0 {
-            cursor
-        } else {
-            referenced
-        };
+            // Canonicalize to the referenced symbol (handles message sends etc.)
+            let referenced = unsafe { clang_getCursorReferenced(cursor) };
+            let target = if unsafe { clang_Cursor_isNull(referenced) } != 0 {
+                cursor
+            } else {
+                referenced
+            };
 
-        // Collect all reference locations via the visitor callback.
-        let mut locations: Vec<Location> = Vec::new();
-        let visitor = CXCursorAndRangeVisitor {
-            context: &mut locations as *mut Vec<Location> as *mut _,
-            visit: Some(visit_reference),
-        };
+            // Collect all reference locations via the visitor callback.
+            let mut locations: Vec<Location> = Vec::new();
+            let visitor = CXCursorAndRangeVisitor {
+                context: &mut locations as *mut Vec<Location> as *mut _,
+                visit: Some(visit_reference),
+            };
 
-        unsafe { clang_findReferencesInFile(target, cx_file, visitor) };
+            unsafe { clang_findReferencesInFile(target, cx_file, visitor) };
 
-        if !include_declaration {
-            // Remove the declaration itself (the first hit is usually the decl).
-            locations.retain(|loc| {
-                // The declaration location matches the target cursor's extent start.
-                let extent = unsafe { clang_getCursorExtent(target) };
-                let start = unsafe { clang_getRangeStart(extent) };
-                let mut decl_line: u32 = 0;
-                let mut decl_col: u32 = 0;
-                unsafe {
-                    clang_getSpellingLocation(
-                        start,
-                        std::ptr::null_mut(),
-                        &mut decl_line,
-                        &mut decl_col,
-                        std::ptr::null_mut(),
-                    )
-                };
-                let decl_pos = Position {
-                    line: decl_line.saturating_sub(1),
-                    character: decl_col.saturating_sub(1),
-                };
-                loc.range.start != decl_pos
-            });
-        }
+            if !include_declaration {
+                // Remove the declaration itself (the first hit is usually the decl).
+                locations.retain(|loc| {
+                    // The declaration location matches the target cursor's extent start.
+                    let extent = unsafe { clang_getCursorExtent(target) };
+                    let start = unsafe { clang_getRangeStart(extent) };
+                    let mut decl_line: u32 = 0;
+                    let mut decl_col: u32 = 0;
+                    unsafe {
+                        clang_getSpellingLocation(
+                            start,
+                            std::ptr::null_mut(),
+                            &mut decl_line,
+                            &mut decl_col,
+                            std::ptr::null_mut(),
+                        )
+                    };
+                    let decl_pos = Position {
+                        line: decl_line.saturating_sub(1),
+                        character: decl_col.saturating_sub(1),
+                    };
+                    loc.range.start != decl_pos
+                });
+            }
 
-        Ok(locations)
-    }
+            Ok(locations)
+        })
 }
 
 // ---------------------------------------------------------------------------
 // libclang visitor callback
 // ---------------------------------------------------------------------------
+
+}
 
 extern "C" fn visit_reference(
     context: *mut ::std::os::raw::c_void,
