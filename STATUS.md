@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（修复 goto-definition：移除 `-fmodules` 根治 `CXError_ASTReadError`，`@import` → `#import` 转换使前缀头在无 modules 时正常工作；commit TBD）
+> 最后更新：2026-02-28（修复 goto-definition：移除 `-fmodules` 根治 `CXError_ASTReadError`，`@import` → `#import` 转换使前缀头在无 modules 时正常工作；commit `6b24af6`）
 
 ---
 
@@ -161,7 +161,7 @@ crates/
 | F6 | `.h` 文件全功能 LSP：修复 documentSelector / languageId / `-x objective-c-header` 三处缺失 | ✅ 完成 (`907ff28`) |
 | F7 | UIKit 类型识别（UIViewController 等）：`-fmodules` + 项目前缀头（`.pch`）注入 | ✅ 完成 (`5dbf267`) |
 || F8 | 富化 SDK 符号 hover：继承链/协议列表/方法签名/@property 属性 + 物理头注释回退 | ✅ 完成 (`33aae60`) |
-|| F9 | goto-definition 修复：移除 `-fmodules` 根治 `CXError_ASTReadError`；`.pch` `@import` → `#import` 转换；`UIImage`/`NSString` 现可正确跳转到 SDK .h | ✅ 完成 (TBD) |
+|| F9 | goto-definition 修复：移除 `-fmodules` 根治 `CXError_ASTReadError`；`.pch` `@import` → `#import` 转换；`UIImage`/`NSString` 现可正确跳转到 SDK .h | ✅ 完成 (`6b24af6`) |
 
 ### 修复详情
 
