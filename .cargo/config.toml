@@ -6,7 +6,18 @@
 # LIBCLANG_PATH  — used by clang-sys's build script to locate libclang.dylib
 # DYLD_LIBRARY_PATH — used by macOS dyld at runtime to load libclang.dylib
 #                     and its dependency libz3.dylib (pulled in by libLLVM)
+#
+# rustflags -rpath — bakes LC_RPATH into the binary so that macOS dyld
+#                     can find libclang.dylib at runtime without any extra
+#                     environment variables (needed when VS Code launches
+#                     the binary directly, outside of a cargo shell).
 
 [env]
 LIBCLANG_PATH = "/opt/homebrew/opt/llvm/lib"
 DYLD_LIBRARY_PATH = "/opt/homebrew/opt/llvm/lib:/opt/homebrew/lib"
+
+[build]
+rustflags = [
+  "-C", "link-arg=-Wl,-rpath,/opt/homebrew/opt/llvm/lib",
+  "-C", "link-arg=-Wl,-rpath,/opt/homebrew/lib",
+]
