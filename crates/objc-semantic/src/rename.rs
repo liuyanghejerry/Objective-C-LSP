@@ -39,7 +39,8 @@ impl ClangIndex {
             None => return Ok(None),
         };
 
-        let cx_file = unsafe { clang_getFile(tu, path_to_cstr(path).as_ptr()) };
+        let path_cstr = path_to_cstr(path);
+        let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
         let loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
         let cursor = unsafe { clang_getCursor(tu, loc) };
         if unsafe { clang_Cursor_isNull(cursor) } != 0 {
@@ -85,7 +86,8 @@ impl ClangIndex {
             None => return Ok(None),
         };
 
-        let cx_file = unsafe { clang_getFile(tu, path_to_cstr(path).as_ptr()) };
+        let path_cstr = path_to_cstr(path);
+        let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
         let loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
         let cursor = unsafe { clang_getCursor(tu, loc) };
         if unsafe { clang_Cursor_isNull(cursor) } != 0 {
@@ -177,7 +179,8 @@ impl ClangIndex {
         };
 
         // Resolve target cursor from primary file.
-        let cx_primary = unsafe { clang_getFile(primary_tu, path_to_cstr(path).as_ptr()) };
+        let primary_path_cstr = path_to_cstr(path);
+        let cx_primary = unsafe { clang_getFile(primary_tu, primary_path_cstr.as_ptr()) };
         let loc = unsafe { clang_getLocation(primary_tu, cx_primary, pos.line + 1, pos.character + 1) };
         let cursor = unsafe { clang_getCursor(primary_tu, loc) };
         if unsafe { clang_Cursor_isNull(cursor) } != 0 {
@@ -205,8 +208,9 @@ impl ClangIndex {
         drop(units);  // release the lock before unsafe libclang calls
 
         for (tu_path, tu) in &all_tus {
+            let tu_path_cstr = path_to_cstr(tu_path);
             let cx_file = unsafe {
-                clang_getFile(*tu, path_to_cstr(tu_path).as_ptr())
+                clang_getFile(*tu, tu_path_cstr.as_ptr())
             };
             if cx_file.is_null() {
                 continue;

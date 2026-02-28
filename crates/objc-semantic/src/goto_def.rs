@@ -25,10 +25,11 @@ impl ClangIndex {
             None => return Ok(None),
         };
 
+        let path_cstr = path_to_cstr(path);
         let location = unsafe {
             clang_getLocation(
                 tu,
-                clang_getFile(tu, path_to_cstr(path).as_ptr()),
+                clang_getFile(tu, path_cstr.as_ptr()),
                 pos.line + 1,
                 pos.character + 1,
             )
@@ -62,10 +63,11 @@ impl ClangIndex {
             None => return Ok(None),
         };
 
+        let path_cstr = path_to_cstr(path);
         let location = unsafe {
             clang_getLocation(
                 tu,
-                clang_getFile(tu, path_to_cstr(path).as_ptr()),
+                clang_getFile(tu, path_cstr.as_ptr()),
                 pos.line + 1,
                 pos.character + 1,
             )

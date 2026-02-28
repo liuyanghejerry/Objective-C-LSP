@@ -32,7 +32,8 @@ impl ClangIndex {
         };
 
         // Resolve the cursor at the requested position.
-        let cx_file = unsafe { clang_getFile(tu, path_to_cstr(path).as_ptr()) };
+        let path_cstr = path_to_cstr(path);
+        let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
         let source_loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
         let cursor = unsafe { clang_getCursor(tu, source_loc) };
         if unsafe { clang_Cursor_isNull(cursor) } != 0 {
