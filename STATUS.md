@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（修复 F12：percent-decode file:// URI，解决带 `+` 文件名的 hover/goto-def 失效；commit `0745ca5`）
+> 最后更新：2026-02-28（Phase 5 完成：代码格式化、代码折叠、调用层级、类型层级）
 
 ---
 
@@ -12,6 +12,7 @@
 | Phase 2 — ObjC 专属功能 | ✅ 完成 | 7/7 功能 |
 | Phase 3 — 高级功能 | ✅ 完成 | 7/7 功能 |
 | Phase 4 — VS Code 扩展 | ✅ 完成 | 8/8 功能 |
+| Phase 5 — 编辑器增强功能 | ✅ 完成 | 4/4 功能 |
 
 ---
 
@@ -73,14 +74,13 @@
 
 | Crate | 测试数 | 状态 | 备注 |
 |-------|--------|------|------|
-| `objc-syntax` | 26 unit + 14 integration = **40** | ✅ 全部通过 | inlay_hints, symbols, tokens, header_detect |
+| `objc-syntax` | 34 unit + 14 integration = **48** | ✅ 全部通过 | inlay_hints, symbols, tokens, header_detect, folding(Phase 5) |
 | `objc-intelligence` | **43** | ✅ 全部通过 | selector, property, protocol, category, header_nav, code_actions, nullability |
-| `objc-semantic` | **8** | ✅ 全部通过 | hover (Apple SDK doc comment + extract_preceding_comment tests) |
+| `objc-semantic` | **14** | ✅ 全部通过 | hover, formatting(4), call_hierarchy(1), type_hierarchy(1) — Phase 5 新增 6 |
 | `objc-lsp` | 0 | ✅ 二进制启动正常 | 尚无测试用例 |
 | `objc-project` | **13** | ✅ 全部通过 | sdk flags, synthetic pod headers, cocoapods fallback |
 | `objc-store` | **12** | ✅ 全部通过 | upsert_file, find_symbols_by_name, search_symbols |
-
-> `cargo test --workspace` 全部通过（**116 tests**，零 failure）。libclang 路径通过 `.cargo/config.toml` 固化，无需手动设置环境变量。
+> `cargo test --workspace` 全部通过（**130 tests**，零 failure）。libclang 路径通过 `.cargo/config.toml` 固化，无需手动设置环境变量。
 ---
 
 ## 目录结构（实际 vs 规划）
@@ -90,13 +90,14 @@ crates/
 ├── objc-lsp/src/
 │   ├── main.rs            ✅
 │   ├── dispatch.rs        ✅
-│   ├── server.rs          ✅  Phase 1, 2 & 3 handlers 全部接入（含 workspace/symbol、code actions）
-│   ├── capabilities.rs    ✅  Phase 1, 2 & 3 capabilities 全部声明
+│   ├── server.rs          ✅  Phase 1–5 handlers 全部接入（含 workspace/symbol、code actions、formatting、folding、call/type hierarchy）
+│   ├── capabilities.rs    ✅  Phase 1–5 capabilities 全部声明
 ├── objc-syntax/src/
 │   ├── parser.rs          ✅
 │   ├── symbols.rs         ✅  含 aggregate_categories()
 │   ├── tokens.rs          ✅
 │   ├── inlay_hints.rs     ✅  Phase 2 新增
+│   ├── folding.rs          ✅  Phase 5 新增（代码折叠）
 │   └── lib.rs             ✅
 ├── objc-semantic/src/
 │   ├── index.rs           ✅
@@ -108,6 +109,9 @@ crates/
 │   ├── rename.rs          ✅  Phase 2 新增
 │   ├── protocol_stubs.rs  ✅  Phase 2 新增
 │   ├── implementation.rs  ✅  Phase 2 新增
+│   ├── formatting.rs      ✅  Phase 5 新增（代码格式化）
+│   ├── call_hierarchy.rs  ✅  Phase 5 新增（调用层级）
+│   ├── type_hierarchy.rs  ✅  Phase 5 新增（类型层级）
 │   └── lib.rs             ✅
 ├── objc-intelligence/src/
 │   ├── selector.rs        ✅
@@ -179,3 +183,19 @@ crates/
 - **hover 叶节点根因（F10）**：`clang_getCursor` 返回最内层**包含**光标的 AST 节点，在 `@implementation` 方法体内部该节点是 `ObjCImplementationDecl`，而非实际被悬停的变量/方法引用。**修复**：新增 `tight_cursor_at()` 函数，以目标列号为中心 tokenize 单行小范围，调用 `clang_annotateTokens` 将每个 token 映射到其叶级 AST cursor，找到覆盖目标列的 token 并返回对应 cursor。同时增加容器体守卫：若解析后 cursor kind 仍为 `ObjCImplementationDecl | ObjCCategoryImplDecl | TranslationUnit`，则返回 `None`（不显示悬停）。
 - **hover 方法体修复根因（F11）**：`CXTranslationUnit_SkipFunctionBodies` 旧旗标指示 clang 跳过所有方法体的解析（加速索引用途），导致 `@implementation` 内部完全没有 AST 节点 —— `clang_getCursor` 对方法体内任意位置均返回 `ObjCImplementationDecl`。另一个加剧因素：缺失第三方头文件时 clang 遇到第一个 fatal error 就停止解析，使 AST 更加不完整。**修复 A**：从 `index.rs` 移除 `CXTranslationUnit_SkipFunctionBodies` 旗标，允许 clang 完整解析方法体，使局部变量、属性访问、方法调用的 cursor 均可被正确解析。**修复 B**：`find_ios_simulator_sdk()` 和 `find_macos_sdk()` 均添加 `-ferror-limit=0`，防止第一个 "file not found" fatal error 中断后续解析，在缺少第三方 Pod 头文件时也能尽量生成完整 AST。
 - **URI percent-decode 根因（F12）**：VS Code 在构造 `file://` URI 时将文件名中的 `+` 编码为 `%2B`（标准 URI 规范行为）。旧 `uri_to_path()` 仅做 `strip_prefix("file://")` 而不解码，导致传给 `clang_getFile()` 的路径包含字面 `%2B`，磁盘上不存在该路径，`clang_getFile()` 返回 null —— 所有 hover 和 goto-definition 操作均静默失败。**修复**：在 `server.rs` 中新增 `percent_decode()` / `hex_val()` 辅助函数，对 `file://` 路径部分做完整 `%XX` 解码（`%2B` → `+`，`%20` → 空格等），使 ObjC category 文件（如 `MyClass+CategoryName.h/.m`）的所有 LSP 功能恢复正常。
+
+---
+
+## Phase 5 — 编辑器增强功能
+
+| # | 功能 | LSP 方法 | 状态 | 实现位置 |
+|---|------|----------|------|----------|
+| 31 | 代码格式化 | `textDocument/formatting` | ✅ 完成 | `objc-semantic/src/formatting.rs`（调用 clang-format 外部进程，4 unit tests） |
+| 32 | 代码折叠 | `textDocument/foldingRange` | ✅ 完成 | `objc-syntax/src/folding.rs`（tree-sitter AST walk，8 unit tests） |
+| 33 | 调用层级 | `callHierarchy/*` | ✅ 完成 | `objc-semantic/src/call_hierarchy.rs`（libclang 驱动，1 unit test） |
+| 34 | 类型层级 | `typeHierarchy/*` | ✅ 完成 | `objc-semantic/src/type_hierarchy.rs`（libclang 驱动，1 unit test） |
+
+**Phase 5 技术备忘**：
+
+- **`type_hierarchy_provider` capability 限制**：`lsp-types` v0.97.0 的 `ServerCapabilities` 结构体不包含 `type_hierarchy_provider` 字段。Handler 已注册并可正常工作（客户端发送请求即可触发），但无法通过 capabilities 主动广告。未来可升级 `lsp-types` 或使用 `experimental` 字段解决。
+- **`clang_visitChildren` 签名**：`clang-sys` v1.8.1 期望普通函数指针（非 `Option`），已在实现中修正。

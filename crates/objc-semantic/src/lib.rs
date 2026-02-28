@@ -18,5 +18,8 @@ pub mod references;
 pub mod implementation;
 pub mod protocol_stubs;
 pub mod rename;
+pub mod formatting;
+pub mod call_hierarchy;
+pub mod type_hierarchy;
 
 pub use index::ClangIndex;

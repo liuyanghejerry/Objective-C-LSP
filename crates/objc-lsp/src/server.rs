@@ -11,22 +11,30 @@ use lsp_types::notification::{
     PublishDiagnostics,
 };
 use lsp_types::request::{
-    CodeActionRequest, Completion, DocumentSymbolRequest, GotoDeclaration, GotoDefinition,
+    CallHierarchyIncomingCalls, CallHierarchyOutgoingCalls, CallHierarchyPrepare,
+    CodeActionRequest, Completion, DocumentSymbolRequest, Formatting, FoldingRangeRequest,
+    GotoDeclaration, GotoDefinition,
     GotoImplementation, HoverRequest, InlayHintRequest, References, Rename,
-    Request as _, SemanticTokensFullRequest, WorkspaceSymbolRequest,
+    Request as _, SemanticTokensFullRequest, TypeHierarchyPrepare, TypeHierarchySubtypes,
+    TypeHierarchySupertypes, WorkspaceSymbolRequest,
 };
 use lsp_types::{
-    CodeAction, CodeActionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, GotoDefinitionParams, HoverParams, InitializeParams,
+    CallHierarchyIncomingCallsParams, CallHierarchyOutgoingCallsParams,
+    CallHierarchyPrepareParams, CodeAction, CodeActionParams,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentFormattingParams, FoldingRangeParams,
+    GotoDefinitionParams, HoverParams, InitializeParams,
     InitializeResult, InlayHintParams, Location, PublishDiagnosticsParams, ReferenceParams,
-    RenameParams, SemanticTokensParams, ServerInfo, SymbolInformation, SymbolKind, Uri,
-    WorkspaceSymbolParams,
+    RenameParams, SemanticTokensParams, ServerInfo, SymbolInformation, SymbolKind,
+    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams,
+    Uri, WorkspaceSymbolParams,
 };
 
 use objc_project::{compile_db::CompileCommandsDb, sdk, FlagResolver};
 use objc_semantic::ClangIndex;
 use objc_store::{IndexStore, SymbolInput};
 use objc_syntax::{flat_symbols, inlay_hints::inlay_hints, symbols::document_symbols, tokens::semantic_tokens_full, ObjcParser};
+use objc_syntax::folding::folding_ranges;
 use objc_intelligence::code_actions::{syntax_code_actions, CodeActionContext};
 use objc_intelligence::nullability::nullability_diagnostics;
 
@@ -190,6 +198,14 @@ impl Server {
             Rename::METHOD => self.on_rename(req)?,
             CodeActionRequest::METHOD => self.on_code_action(req)?,
             WorkspaceSymbolRequest::METHOD => self.on_workspace_symbol(req)?,
+            Formatting::METHOD => self.on_formatting(req)?,
+            FoldingRangeRequest::METHOD => self.on_folding_range(req)?,
+            CallHierarchyPrepare::METHOD => self.on_call_hierarchy_prepare(req)?,
+            CallHierarchyIncomingCalls::METHOD => self.on_call_hierarchy_incoming(req)?,
+            CallHierarchyOutgoingCalls::METHOD => self.on_call_hierarchy_outgoing(req)?,
+            TypeHierarchyPrepare::METHOD => self.on_type_hierarchy_prepare(req)?,
+            TypeHierarchySupertypes::METHOD => self.on_type_hierarchy_supertypes(req)?,
+            TypeHierarchySubtypes::METHOD => self.on_type_hierarchy_subtypes(req)?,
             _ => {
                 // Unknown request: send empty response to avoid client timeout.
                 let resp = Response::new_ok(req.id, serde_json::Value::Null);
@@ -645,6 +661,186 @@ impl Server {
     }
 
 
+    // -----------------------------------------------------------------------
+    // Phase 5: Formatting, Folding, Call Hierarchy, Type Hierarchy
+    // -----------------------------------------------------------------------
+
+    fn on_formatting(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, DocumentFormattingParams) =
+            req.extract(Formatting::METHOD)?;
+        let uri = &params.text_document.uri;
+
+        let result = if let (Some(path), Some(doc)) = (Self::uri_to_path(uri), self.documents.get(uri)) {
+            match objc_semantic::formatting::format_document(&path, &doc.content) {
+                Ok(edits) if !edits.is_empty() => serde_json::to_value(edits)?,
+                Ok(_) => serde_json::Value::Null,
+                Err(e) => {
+                    tracing::warn!("formatting error: {e}");
+                    serde_json::Value::Null
+                }
+            }
+        } else {
+            serde_json::Value::Null
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
+    fn on_folding_range(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, FoldingRangeParams) =
+            req.extract(FoldingRangeRequest::METHOD)?;
+        let uri = &params.text_document.uri;
+
+        let result = if let Some(doc) = self.documents.get(uri) {
+            let mut parser = self.parser.lock().unwrap();
+            match parser.parse(&doc.content) {
+                Ok(parsed) => match folding_ranges(&parsed) {
+                    Ok(ranges) if !ranges.is_empty() => serde_json::to_value(ranges)?,
+                    Ok(_) => serde_json::Value::Array(vec![]),
+                    Err(e) => {
+                        tracing::warn!("folding range error: {e}");
+                        serde_json::Value::Array(vec![])
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("parse error for folding ranges: {e}");
+                    serde_json::Value::Array(vec![])
+                }
+            }
+        } else {
+            serde_json::Value::Array(vec![])
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
+    fn on_call_hierarchy_prepare(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, CallHierarchyPrepareParams) =
+            req.extract(CallHierarchyPrepare::METHOD)?;
+        let uri = &params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+
+        let result = if let Some(path) = Self::uri_to_path(uri) {
+            match self.clang_index.call_hierarchy_prepare(&path, pos) {
+                Ok(Some(item)) => serde_json::to_value(vec![item])?,
+                Ok(None) => serde_json::Value::Null,
+                Err(e) => {
+                    tracing::warn!("callHierarchy/prepare error: {e}");
+                    serde_json::Value::Null
+                }
+            }
+        } else {
+            serde_json::Value::Null
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
+    fn on_call_hierarchy_incoming(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, CallHierarchyIncomingCallsParams) =
+            req.extract(CallHierarchyIncomingCalls::METHOD)?;
+        let item = &params.item;
+
+        let result = match self.clang_index.call_hierarchy_incoming(&item) {
+            Ok(calls) if !calls.is_empty() => serde_json::to_value(calls)?,
+            Ok(_) => serde_json::Value::Array(vec![]),
+            Err(e) => {
+                tracing::warn!("callHierarchy/incomingCalls error: {e}");
+                serde_json::Value::Array(vec![])
+            }
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
+    fn on_call_hierarchy_outgoing(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, CallHierarchyOutgoingCallsParams) =
+            req.extract(CallHierarchyOutgoingCalls::METHOD)?;
+        let item = &params.item;
+
+        let result = match self.clang_index.call_hierarchy_outgoing(&item) {
+            Ok(calls) if !calls.is_empty() => serde_json::to_value(calls)?,
+            Ok(_) => serde_json::Value::Array(vec![]),
+            Err(e) => {
+                tracing::warn!("callHierarchy/outgoingCalls error: {e}");
+                serde_json::Value::Array(vec![])
+            }
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
+    fn on_type_hierarchy_prepare(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, TypeHierarchyPrepareParams) =
+            req.extract(TypeHierarchyPrepare::METHOD)?;
+        let uri = &params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+
+        let result = if let Some(path) = Self::uri_to_path(uri) {
+            match self.clang_index.type_hierarchy_prepare(&path, pos) {
+                Ok(Some(item)) => serde_json::to_value(vec![item])?,
+                Ok(None) => serde_json::Value::Null,
+                Err(e) => {
+                    tracing::warn!("typeHierarchy/prepare error: {e}");
+                    serde_json::Value::Null
+                }
+            }
+        } else {
+            serde_json::Value::Null
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
+    fn on_type_hierarchy_supertypes(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, TypeHierarchySupertypesParams) =
+            req.extract(TypeHierarchySupertypes::METHOD)?;
+        let item = &params.item;
+
+        let result = match self.clang_index.type_hierarchy_supertypes(&item) {
+            Ok(types) if !types.is_empty() => serde_json::to_value(types)?,
+            Ok(_) => serde_json::Value::Array(vec![]),
+            Err(e) => {
+                tracing::warn!("typeHierarchy/supertypes error: {e}");
+                serde_json::Value::Array(vec![])
+            }
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
+    fn on_type_hierarchy_subtypes(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, TypeHierarchySubtypesParams) =
+            req.extract(TypeHierarchySubtypes::METHOD)?;
+        let item = &params.item;
+
+        let result = match self.clang_index.type_hierarchy_subtypes(&item) {
+            Ok(types) if !types.is_empty() => serde_json::to_value(types)?,
+            Ok(_) => serde_json::Value::Array(vec![]),
+            Err(e) => {
+                tracing::warn!("typeHierarchy/subtypes error: {e}");
+                serde_json::Value::Array(vec![])
+            }
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
     // -----------------------------------------------------------------------
     // Diagnostics
     // -----------------------------------------------------------------------

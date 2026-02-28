@@ -462,3 +462,86 @@ objective-c-lsp/
     ├── fixtures/           # ObjC 测试 fixture（Rust + TS 共用）
     └── integration/
 ```
+
+---
+
+## 十二、Phase 5 — 编辑器增强功能
+
+> 目标：提升日常编码体验——格式化、折叠、调用/类型层级导航，让 ObjC 在 IDE 中拥有与 Swift/Java 同等的导航能力。
+
+### 5.1 功能列表
+
+| # | 功能 | LSP 方法 | 实现层 | 说明 |
+|---|------|----------|--------|------|
+| 31 | **代码格式化** | `textDocument/formatting` | `objc-semantic` | 调用 `clang-format` 外部进程，支持 `.clang-format` 配置文件；ObjC 优化默认风格（`Language: ObjC`） |
+| 32 | **代码折叠** | `textDocument/foldingRange` | `objc-syntax` | tree-sitter 驱动：折叠 `@interface`/`@implementation` 块、方法体、多行注释、`#pragma mark` 区域、`NS_ASSUME_NONNULL` 区域 |
+| 33 | **调用层级** | `callHierarchy/prepare` + `incomingCalls` + `outgoingCalls` | `objc-semantic` | libclang 驱动：ObjC message send 的调用关系追踪；支持 `[obj method:]` 形式的 selector 调用 |
+| 34 | **类型层级** | `typeHierarchy/prepare` + `supertypes` + `subtypes` | `objc-semantic` | libclang 驱动：ObjC 类继承链（`@interface Foo : Bar`）与 Protocol 实现层级（`<NSCoding, NSCopying>`） |
+
+### 5.2 技术设计
+
+#### #31 代码格式化
+
+- **实现方式**：调用系统 `clang-format` 命令行工具（非 libclang API），通过 `std::process::Command` 执行
+- **配置查找**：依次查找工作区 `.clang-format` → `_clang-format` → 使用内置默认配置
+- **默认风格**：`BasedOnStyle: LLVM` + `Language: ObjC` + `ColumnLimit: 120`
+- **unsaved buffer 支持**：通过 stdin 传入当前文档内容，`clang-format` 从 stdin 读取并输出到 stdout
+- **fallback**：若 `clang-format` 不在 PATH 中，返回空编辑数组并通过 `window/showMessage` 提示用户安装
+
+#### #32 代码折叠
+
+- **实现方式**：tree-sitter AST walk，识别以下可折叠区域：
+  - `@interface ... @end` 块
+  - `@implementation ... @end` 块
+  - `@protocol ... @end` 块
+  - 方法体 `{ ... }`（`method_definition` / `function_definition`）
+  - 多行注释 `/* ... */` 和 `/** ... */`
+  - `#pragma mark` 区域（从当前 `#pragma mark` 到下一个 `#pragma mark` 或 `@end`）
+  - `#import` 块（连续的 `#import` 行折叠为一个区域）
+  - `NS_ASSUME_NONNULL_BEGIN ... NS_ASSUME_NONNULL_END` 区域
+- **FoldingRangeKind**：`comment`（注释类）、`imports`（import 块）、`region`（其余）
+
+#### #33 调用层级
+
+- **prepare**：使用 `clang_getCursor` 找到方法/函数声明，返回 `CallHierarchyItem`
+- **incomingCalls**：遍历 TU 的所有 cursor，找到调用目标方法的 `ObjCMessageExpr` / `CallExpr` 节点
+- **outgoingCalls**：遍历目标方法体内的所有 `ObjCMessageExpr` / `CallExpr` 子节点
+- **ObjC 特化**：对 `[obj method:arg1 withParam:arg2]` 形式的 message send 正确构建 selector 字符串进行匹配
+
+#### #34 类型层级
+
+- **prepare**：使用 `clang_getCursor` 找到类/协议声明，返回 `TypeHierarchyItem`
+- **supertypes**：通过 `clang_visitChildren` 收集 `ObjCSuperClassRef` 和 `ObjCProtocolRef` 子节点
+- **subtypes**：遍历 TU 中所有 `ObjCInterfaceDecl`，检查其 superclass 是否为目标类
+- **Protocol 层级**：`@protocol Foo <Bar, Baz>` 中 `Bar`/`Baz` 作为 supertypes
+
+### 5.3 新增文件
+
+```
+crates/objc-syntax/src/
+    folding.rs              # #32 折叠范围（tree-sitter）
+
+crates/objc-semantic/src/
+    formatting.rs           # #31 代码格式化（clang-format）
+    call_hierarchy.rs       # #33 调用层级（libclang）
+    type_hierarchy.rs       # #34 类型层级（libclang）
+```
+
+### 5.4 Capabilities 新增
+
+```rust
+// capabilities.rs 新增声明
+document_formatting_provider: Some(OneOf::Left(true)),
+folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
+type_hierarchy_provider: Some(TypeHierarchyServerCapability::Simple(true)),
+```
+
+### 5.5 测试策略
+
+| 功能 | 测试方式 |
+|------|----------|
+| 格式化 | 对固定 ObjC 源码调用 formatting，断言输出与 `clang-format` 结果一致；测试无 `clang-format` 时的 fallback |
+| 折叠 | 包含 `@interface`/方法/注释/import 的 fixture，断言折叠区域数量与范围 |
+| 调用层级 | fixture 中 A 调用 B、B 调用 C，断言 incoming/outgoing 方向正确 |
+| 类型层级 | fixture 中 `Foo : Bar : NSObject`，断言 supertypes 链和 subtypes 反向查找 |

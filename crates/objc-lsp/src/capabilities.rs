@@ -1,7 +1,8 @@
 //! LSP capability advertisement.
 
 use lsp_types::{
-    CodeActionOptions, CodeActionProviderCapability, CompletionOptions, DocumentSymbolOptions,
+    CallHierarchyServerCapability, CodeActionOptions, CodeActionProviderCapability,
+    CompletionOptions, DocumentSymbolOptions, FoldingRangeProviderCapability,
     HoverProviderCapability, ImplementationProviderCapability, InlayHintOptions,
     InlayHintServerCapabilities, OneOf, RenameOptions, SemanticTokensServerCapabilities,
     ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
@@ -83,6 +84,18 @@ pub fn server_capabilities() -> ServerCapabilities {
 
         // Workspace symbol search.
         workspace_symbol_provider: Some(OneOf::Left(true)),
+
+        // Document formatting (clang-format).
+        document_formatting_provider: Some(OneOf::Left(true)),
+
+        // Folding ranges (tree-sitter).
+        folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+
+        // Call hierarchy (libclang).
+        call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
+
+        // Type hierarchy (libclang) — handlers registered, capability advertised
+        // via experimental until lsp-types adds type_hierarchy_provider to ServerCapabilities.
 
         // More capabilities will be added as features are implemented.
         ..Default::default()

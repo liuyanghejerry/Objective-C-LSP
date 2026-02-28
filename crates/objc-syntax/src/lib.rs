@@ -11,6 +11,7 @@ pub mod parser;
 pub mod symbols;
 pub mod tokens;
 pub mod inlay_hints;
+pub mod folding;
 
 pub use parser::ObjcParser;
 pub use symbols::{flat_symbols, FlatSymbol};
