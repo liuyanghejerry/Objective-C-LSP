@@ -288,3 +288,177 @@ tracing-subscriber = "0.3"
 - [clangd ObjC issues](https://github.com/clangd/clangd/issues?q=objc)
 - [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp)
 - [tower-lsp-server](https://github.com/tower-lsp-community/tower-lsp-server)
+- [VS Code Extension API](https://code.visualstudio.com/api)
+- [vscode-languageclient npm](https://github.com/microsoft/vscode-languageserver-node/tree/main/client)
+- [yo code 脚手架](https://github.com/microsoft/vscode-generator-code)
+
+---
+
+## 十、Phase 4 — VS Code 扩展
+
+> 目标：让用户在 VS Code 中打开 ObjC 项目即开箱可用，无需任何手动配置。
+
+### 4.1 扩展架构
+
+```
+editors/vscode/          # 独立的 npm 包（TypeScript）
+├── package.json         # 扩展清单 + 依赖
+├── tsconfig.json
+├── src/
+│   ├── extension.ts     # 入口：activate / deactivate
+│   ├── server.ts        # LanguageClient 配置，启动 objc-lsp 进程
+│   ├── install.ts       # 自动下载 / 定位本地 objc-lsp 二进制
+│   └── config.ts        # 读取 workspace 设置，映射到 LSP initializationOptions
+├── syntaxes/
+│   └── objc.tmLanguage.json   # TextMate 语法（补全 VS Code 内置 ObjC 高亮的缺失）
+├── language-configuration.json  # 括号配对、注释、自动缩进规则
+└── icons/
+    └── objc-lsp.png     # 扩展图标
+```
+
+### 4.2 功能列表
+
+| # | 功能 | 说明 |
+|---|------|------|
+| 23 | **LSP 客户端集成** | 通过 `vscode-languageclient` 启动 `objc-lsp` 子进程，转发全部 LSP 消息 |
+| 24 | **二进制自动发现** | 按序查找：用户配置路径 → 扩展 bundle 内 → `$PATH`，找不到时给出一键安装引导 |
+| 25 | **语言 id 注册** | 将 `.m`、`.mm`、`.h`（ObjC 启发式判定后）注册为 `objective-c` language id |
+| 26 | **TextMate 语法增强** | 补充 VS Code 内置语法缺失的 token（block 字面量、消息发送括号对、编译器指令） |
+| 27 | **工作区配置** | 暴露常用设置：`objc-lsp.serverPath`、`objc-lsp.logLevel`、`objc-lsp.extraCompilerFlags` |
+| 28 | **状态栏指示器** | 显示 LSP 连接状态（⚡ Indexing / ✓ Ready / ✗ Error）及文件类型检测结果 |
+| 29 | **命令面板命令** | `ObjC: Restart Language Server`、`ObjC: Show Output`、`ObjC: Report Issue` |
+| 30 | **调试支持** | launch.json snippet：LLDB 附加到 ObjC 进程（macOS） |
+
+### 4.3 实现步骤
+
+#### Step 1 — 项目脚手架
+- `npm init` 初始化 `editors/vscode/`，依赖：`@types/vscode`、`vscode-languageclient`、`esbuild`（打包）
+- 配置 `tsconfig.json`（`target: ES2020`，`moduleResolution: Node16`）
+- 配置 `esbuild` bundle script（输出单文件 `dist/extension.js`）
+
+#### Step 2 — LanguageClient 配置（核心）
+- `extension.ts` 的 `activate()` 中：
+  - 调用 `findServerBinary()` 定位 `objc-lsp`
+  - 创建 `ServerOptions`：`{ command, args: [], options: { env } }`
+  - 创建 `LanguageClientOptions`：`documentSelector: [{ language: 'objective-c' }]`
+  - `new LanguageClient(...).start()`
+- `deactivate()` 中 stop client
+
+#### Step 3 — 二进制发现与安装引导
+- 优先级：`objc-lsp.serverPath` setting → `./bin/objc-lsp`（bundle 内） → `which objc-lsp`
+- 未找到时，弹出 notification："objc-lsp not found. [Install via Homebrew] [Set path manually]"
+- Homebrew 安装命令：`brew install objective-c-lsp`（规划，需配合 Formula）
+
+#### Step 4 — 语言 id 注册与 TextMate 语法
+- `package.json` 中声明 `contributes.languages`：扩展名 `.m`、`.mm`，语言 id `objective-c`
+- `contributes.grammars`：注入 `syntaxes/objc.tmLanguage.json`，补充消息发送、block 等 scope
+- `language-configuration.json`：配置 `[]`、`()`、`@""` 括号对，行/块注释规则
+
+#### Step 5 — 工作区设置 schema
+```jsonc
+// package.json contributes.configuration
+{
+  "objc-lsp.serverPath": {
+    "type": "string",
+    "default": "",
+    "description": "objc-lsp 二进制的绝对路径。留空自动查找。"
+  },
+  "objc-lsp.logLevel": {
+    "type": "string",
+    "enum": ["error", "warn", "info", "debug"],
+    "default": "info"
+  },
+  "objc-lsp.extraCompilerFlags": {
+    "type": "array",
+    "items": { "type": "string" },
+    "default": [],
+    "description": "附加传入 clang 的编译参数，例如 [\"-DDEBUG\", \"-I/usr/local/include\"]"
+  },
+  "objc-lsp.enableNullabilityChecks": {
+    "type": "boolean",
+    "default": true,
+    "description": "启用 Nullability 缺失标注检查"
+  },
+  "objc-lsp.enableStaticAnalyzer": {
+    "type": "boolean",
+    "default": false,
+    "description": "启用 clang --analyze 静态分析（速度较慢，建议仅在保存时触发）"
+  }
+}
+```
+
+#### Step 6 — 状态栏与命令
+- `vscode.window.createStatusBarItem()` 订阅 client state change 事件更新图标
+- 注册命令 `objc-lsp.restart`：stop → start client
+- 注册命令 `objc-lsp.showOutput`：`client.outputChannel.show()`
+
+#### Step 7 — 打包与发布
+- `esbuild` 打包为单文件 `dist/extension.js`（含所有 npm 依赖，除 `vscode`）
+- `vsce package` 生成 `.vsix`
+- 本地安装：`code --install-extension objc-lsp-*.vsix`
+- 远期：发布至 [VS Code Marketplace](https://marketplace.visualstudio.com/)
+
+### 4.4 目录结构（最终）
+
+```
+editors/vscode/
+├── package.json
+├── package-lock.json
+├── tsconfig.json
+├── esbuild.mjs              # 打包脚本
+├── src/
+│   ├── extension.ts         # activate / deactivate
+│   ├── server.ts            # LanguageClient + ServerOptions
+│   ├── install.ts           # 二进制发现逻辑
+│   └── config.ts            # 设置读取与映射
+├── syntaxes/
+│   └── objc.tmLanguage.json
+├── language-configuration.json
+├── icons/
+│   └── objc-lsp.png
+└── dist/                    # 构建产物（gitignore）
+    └── extension.js
+```
+
+### 4.5 与 LSP 服务器的集成点
+
+扩展通过 `initializationOptions` 将用户设置传给 `objc-lsp`：
+
+```json
+{
+  "logLevel": "info",
+  "extraCompilerFlags": ["-DDEBUG"],
+  "enableNullabilityChecks": true,
+  "enableStaticAnalyzer": false
+}
+```
+
+`objc-lsp` 的 `server.rs` 需在 `initialize` 处理中读取并应用这些选项（Phase 4 新增的服务端配合工作）。
+
+### 4.6 测试策略
+
+| 层 | 测试方式 |
+|---|---------|
+| 扩展激活 | VS Code Extension Test Runner（`@vscode/test-electron`） |
+| 二进制发现逻辑 | Jest 单元测试（mock `process.env`、`fs.existsSync`） |
+| 端到端 LSP 交互 | 集成测试：在 VS Code 测试实例中打开 fixture ObjC 文件，断言 hover/completion 响应 |
+
+---
+
+## 十一、Phase 4 更新的目录结构说明
+
+Phase 4 完成后，`editors/vscode/` 目录将成为独立的 npm 包，与 Rust workspace 并列：
+
+```
+objective-c-lsp/
+├── Cargo.toml              # Rust workspace（不变）
+├── PLANNING.md
+├── STATUS.md
+├── crates/                 # Rust crates（Phase 1–3，不变）
+├── editors/
+│   ├── vscode/             # Phase 4 新增：VS Code 扩展
+│   └── neovim/             # 未来：Neovim 配置示例（nvim-lspconfig snippet）
+└── tests/
+    ├── fixtures/           # ObjC 测试 fixture（Rust + TS 共用）
+    └── integration/
+```
