@@ -21,3 +21,5 @@ Cargo.lock
 *.db
 *.db-shm
 *.db-wal
+
+tests/fixtures/.cache
