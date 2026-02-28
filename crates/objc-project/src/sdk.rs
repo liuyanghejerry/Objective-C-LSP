@@ -28,8 +28,11 @@ pub fn find_macos_sdk() -> Option<SdkInfo> {
 
     Some(SdkInfo {
         flags: vec![
-            format!("-isysroot"),
+            "-isysroot".to_owned(),
             sdk_root.to_string_lossy().into_owned(),
+            "-Wno-unknown-pragmas".to_owned(),
+            "-Wno-error".to_owned(),
+            "-ferror-limit=0".to_owned(),
         ],
         sdk_root,
     })
@@ -310,6 +313,10 @@ pub fn find_ios_simulator_sdk() -> Option<SdkInfo> {
             // Suppress warnings about non-portable Apple-specific pragmas
             "-Wno-unknown-pragmas".to_owned(),
             "-Wno-error".to_owned(),
+            // Allow clang to continue past fatal "file not found" errors so
+            // that method bodies in files with missing third-party headers still
+            // get fully parsed (required for hover / goto-def inside those files).
+            "-ferror-limit=0".to_owned(),
         ],
         sdk_root,
     })

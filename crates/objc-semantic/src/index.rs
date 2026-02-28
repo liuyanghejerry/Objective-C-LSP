@@ -58,8 +58,7 @@ impl ClangIndex {
 
         let argv_ptrs: Vec<*const i8> = argv_cstrings.iter().map(|s| s.as_ptr()).collect();
 
-        let flags =
-            CXTranslationUnit_DetailedPreprocessingRecord | CXTranslationUnit_SkipFunctionBodies;
+        let flags = CXTranslationUnit_DetailedPreprocessingRecord;
 
         // Clang indexes are not Send but we hold &self across the guard —
         // the guard runs on the same thread, so this is safe.

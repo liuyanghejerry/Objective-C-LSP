@@ -47,6 +47,7 @@ impl ClangIndex {
                 cursor
             };
 
+
             // Skip preprocessor / invalid cursors — calling type-spelling or
             // comment-text APIs on macro expansions with undefined macros (from
             // missing headers) causes a SIGSEGV inside libclang.
