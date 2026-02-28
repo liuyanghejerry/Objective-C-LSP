@@ -44,6 +44,9 @@ impl ClangIndex {
         with_crash_guard(|| {
             let path_cstr = path_to_cstr(path);
             let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
+            if cx_file.is_null() {
+                return Ok(None);
+            }
             let loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
             let cursor = unsafe { clang_getCursor(tu, loc) };
             if unsafe { clang_Cursor_isNull(cursor) } != 0 {
@@ -95,6 +98,9 @@ impl ClangIndex {
         with_crash_guard(|| {
             let path_cstr = path_to_cstr(path);
             let cx_file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
+            if cx_file.is_null() {
+                return Ok(None);
+            }
             let loc = unsafe { clang_getLocation(tu, cx_file, pos.line + 1, pos.character + 1) };
             let cursor = unsafe { clang_getCursor(tu, loc) };
             if unsafe { clang_Cursor_isNull(cursor) } != 0 {
@@ -196,6 +202,9 @@ impl ClangIndex {
             // Resolve target cursor from primary file.
             let primary_path_cstr = path_to_cstr(path);
             let cx_primary = unsafe { clang_getFile(primary_tu, primary_path_cstr.as_ptr()) };
+            if cx_primary.is_null() {
+                return Ok(None);
+            }
             let loc = unsafe { clang_getLocation(primary_tu, cx_primary, pos.line + 1, pos.character + 1) };
             let cursor = unsafe { clang_getCursor(primary_tu, loc) };
             if unsafe { clang_Cursor_isNull(cursor) } != 0 {
@@ -375,10 +384,11 @@ fn path_to_cstr(path: &Path) -> CString {
 
 fn cx_string_owned(s: CXString) -> String {
     use std::ffi::CStr;
-    let result = unsafe {
-        CStr::from_ptr(clang_getCString(s))
-            .to_string_lossy()
-            .into_owned()
+    let ptr = unsafe { clang_getCString(s) };
+    let result = if ptr.is_null() {
+        String::new()
+    } else {
+        unsafe { CStr::from_ptr(ptr).to_string_lossy().into_owned() }
     };
     unsafe { clang_disposeString(s) };
     result

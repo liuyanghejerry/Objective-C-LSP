@@ -26,17 +26,35 @@ impl ClangIndex {
         with_crash_guard(|| {
             // Clang positions are 1-based.
             let path_cstr = path_to_cstr(path);
+            let file = unsafe { clang_getFile(tu, path_cstr.as_ptr()) };
+            if file.is_null() {
+                // TU doesn't know this file (path mismatch) — nothing to hover.
+                return Ok(None);
+            }
             let location = unsafe {
                 clang_getLocation(
                     tu,
-                    clang_getFile(tu, path_cstr.as_ptr()),
+                    file,
                     pos.line + 1,
                     pos.character + 1,
                 )
             };
-
             let cursor = unsafe { clang_getCursor(tu, location) };
             if unsafe { clang_Cursor_isNull(cursor) } != 0 {
+                return Ok(None);
+            }
+
+            // Skip preprocessor / invalid cursors — calling type-spelling or
+            // comment-text APIs on macro expansions with undefined macros (from
+            // missing headers) causes a SIGSEGV inside libclang.
+            let kind = unsafe { clang_getCursorKind(cursor) };
+            if kind == CXCursor_InvalidCode || kind == CXCursor_NoDeclFound {
+                return Ok(None);
+            }
+            // Preprocessor cursors: MacroExpansion=103, MacroDefinition=102, InclusionDirective=104
+            // MacroExpansion cursors for undefined macros can SIGSEGV inside clang_getCursorDisplayName.
+            let is_preprocessor = kind >= 100 && kind <= 110;
+            if is_preprocessor {
                 return Ok(None);
             }
 
@@ -44,7 +62,7 @@ impl ClangIndex {
             let mut parts: Vec<String> = Vec::new();
 
             // Cursor kind as readable label.
-            let kind_str = cursor_kind_label(unsafe { clang_getCursorKind(cursor) });
+            let kind_str = cursor_kind_label(kind);
 
             // Display name (includes selector for ObjC methods).
             let display = cx_string_owned(unsafe { clang_getCursorDisplayName(cursor) });
@@ -52,25 +70,31 @@ impl ClangIndex {
                 parts.push(format!("**{kind_str}** `{display}`"));
             }
 
-            // Type spelling.
-            let ty = unsafe { clang_getCursorType(cursor) };
-            let ty_str = cx_string_owned(unsafe { clang_getTypeSpelling(ty) });
-            if !ty_str.is_empty() && ty_str != "void" {
-                parts.push(format!("*Type:* `{ty_str}`"));
+            // Type spelling — unsafe for preprocessor cursors with undefined macros.
+            if !is_preprocessor {
+                let ty = unsafe { clang_getCursorType(cursor) };
+                // Only spell non-invalid types.
+                if ty.kind != CXType_Invalid {
+                    let ty_str = cx_string_owned(unsafe { clang_getTypeSpelling(ty) });
+                    if !ty_str.is_empty() && ty_str != "void" {
+                        parts.push(format!("*Type:* `{ty_str}`"));
+                    }
+                }
             }
-
-            // Brief doc comment from clang (covers Doxygen-style brief).
-            let comment = unsafe { clang_Cursor_getBriefCommentText(cursor) };
-            let comment_str = cx_string_owned(comment);
-            if !comment_str.is_empty() {
-                parts.push(comment_str);
-            } else {
-                // Fall back to the full raw comment text — this covers Apple
-                // HeaderDoc `/*!` blocks and multi-paragraph doc comments.
-                let raw = cx_string_owned(unsafe { clang_Cursor_getRawCommentText(cursor) });
-                let cleaned = clean_raw_comment(&raw);
-                if !cleaned.is_empty() {
-                    parts.push(cleaned);
+            // Brief doc comment — also unsafe for preprocessor cursors.
+            if !is_preprocessor {
+                let comment = unsafe { clang_Cursor_getBriefCommentText(cursor) };
+                let comment_str = cx_string_owned(comment);
+                if !comment_str.is_empty() {
+                    parts.push(comment_str);
+                } else {
+                    // Fall back to the full raw comment text — this covers Apple
+                    // HeaderDoc `/*!` blocks and multi-paragraph doc comments.
+                    let raw = cx_string_owned(unsafe { clang_Cursor_getRawCommentText(cursor) });
+                    let cleaned = clean_raw_comment(&raw);
+                    if !cleaned.is_empty() {
+                        parts.push(cleaned);
+                    }
                 }
             }
 
@@ -116,10 +140,11 @@ fn path_to_cstr(path: &Path) -> std::ffi::CString {
 }
 
 fn cx_string_owned(s: CXString) -> String {
-    let result = unsafe {
-        CStr::from_ptr(clang_getCString(s))
-            .to_string_lossy()
-            .into_owned()
+    let ptr = unsafe { clang_getCString(s) };
+    let result = if ptr.is_null() {
+        String::new()
+    } else {
+        unsafe { CStr::from_ptr(ptr).to_string_lossy().into_owned() }
     };
     unsafe { clang_disposeString(s) };
     result

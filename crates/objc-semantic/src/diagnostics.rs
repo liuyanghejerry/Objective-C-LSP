@@ -157,10 +157,11 @@ fn location_to_range(loc: CXSourceLocation) -> Range {
 }
 
 fn cx_string_to_owned(s: CXString) -> String {
-    let result = unsafe {
-        CStr::from_ptr(clang_getCString(s))
-            .to_string_lossy()
-            .into_owned()
+    let ptr = unsafe { clang_getCString(s) };
+    let result = if ptr.is_null() {
+        String::new()
+    } else {
+        unsafe { CStr::from_ptr(ptr).to_string_lossy().into_owned() }
     };
     unsafe { clang_disposeString(s) };
     result
