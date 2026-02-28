@@ -642,4 +642,85 @@ mod tests {
             "expected 'sayHello' in Person children, got: {child_names:?}",
         );
     }
+
+    #[test]
+    fn impl_only_no_interface() {
+        // A bare @implementation without a matching @interface.
+        // The class should still appear as a CLASS symbol.
+        let src = "@implementation Bar\n- (void)run {}\n@end\n";
+        let file = parse(src);
+        let syms = document_symbols(&file).unwrap();
+        assert!(names(&syms).contains(&"Bar"), "expected 'Bar' symbol, got: {:?}", names(&syms));
+        let bar = syms.iter().find(|s| s.name == "Bar").unwrap();
+        let child_names: Vec<&str> = bar
+            .children
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert!(child_names.contains(&"run"), "expected 'run' in Bar children, got: {child_names:?}");
+    }
+
+    #[test]
+    fn multiple_categories_aggregated_into_base() {
+        let src = concat!(
+            "@interface Animal : NSObject\n",
+            "- (void)breathe;\n",
+            "@end\n",
+            "@interface Animal (Eating)\n",
+            "- (void)eat;\n",
+            "@end\n",
+            "@interface Animal (Moving)\n",
+            "- (void)move;\n",
+            "@end\n",
+        );
+        let file = parse(src);
+        let syms = document_symbols(&file).unwrap();
+        assert_eq!(
+            syms.iter().filter(|s| s.name == "Animal").count(),
+            1,
+            "expected one 'Animal' symbol: {:?}", names(&syms)
+        );
+        assert!(!names(&syms).contains(&"Animal (Eating)"), "{:?}", names(&syms));
+        assert!(!names(&syms).contains(&"Animal (Moving)"), "{:?}", names(&syms));
+        let animal = syms.iter().find(|s| s.name == "Animal").unwrap();
+        let child_names: Vec<&str> = animal
+            .children
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert!(child_names.contains(&"eat"),  "expected 'eat': {child_names:?}");
+        assert!(child_names.contains(&"move"), "expected 'move': {child_names:?}");
+    }
+
+    #[test]
+    fn anonymous_category_extension() {
+        let src = concat!(
+            "@interface Foo : NSObject\n",
+            "@end\n",
+            "@interface Foo ()\n",
+            "- (void)privateHelper;\n",
+            "@end\n",
+        );
+        let file = parse(src);
+        let syms = document_symbols(&file).unwrap();
+        let foo_count = syms.iter().filter(|s| s.name == "Foo").count();
+        assert!(foo_count >= 1, "expected at least one 'Foo': {:?}", names(&syms));
+        assert!(
+            !names(&syms).contains(&"Foo ()"),
+            "anonymous category should not appear separately: {:?}", names(&syms)
+        );
+    }
+
+    #[test]
+    fn orphan_category_without_base_class_is_kept() {
+        let src = "@interface NSString (Utils)\n- (NSString *)trimmed;\n@end\n";
+        let file = parse(src);
+        let syms = document_symbols(&file).unwrap();
+        let has_utils = syms.iter().any(|s| s.name.contains("NSString"));
+        assert!(has_utils, "expected NSString-related symbol: {:?}", names(&syms));
+    }
 }

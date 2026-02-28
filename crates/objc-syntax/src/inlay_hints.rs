@@ -149,4 +149,71 @@ mod tests {
             "expected 'age:' hint, got: {labels:?}"
         );
     }
+
+    #[test]
+    fn hints_for_single_keyword_send() {
+        // `[obj setName:n]` — one keyword argument → one hint.
+        let src = "void f(id obj, NSString *n) { [obj setName:n]; }";
+        let file = parse(src);
+        let hints = inlay_hints(&file, None).unwrap();
+        let labels: Vec<&str> = hints
+            .iter()
+            .filter_map(|h| {
+                if let InlayHintLabel::String(s) = &h.label {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(labels, ["setName:"], "expected exactly one label, got: {labels:?}");
+    }
+
+    #[test]
+    fn no_hints_for_nested_nullary_outer() {
+        // `[[Foo alloc] init]` — outer send `alloc` is nullary (no args),
+        // inner send `init` is also nullary. Neither should produce hints.
+        let src = "id x = [[NSObject alloc] init];";
+        let file = parse(src);
+        let hints = inlay_hints(&file, None).unwrap();
+        assert!(hints.is_empty(), "expected no hints for nullary chain, got: {hints:?}");
+    }
+
+    #[test]
+    fn hints_for_keyword_in_nested_send() {
+        // `[[Foo alloc] initWithName:n]` — inner send has one keyword arg.
+        let src = "void f(NSString *n) { id x = [[NSObject alloc] initWithName:n]; }";
+        let file = parse(src);
+        let hints = inlay_hints(&file, None).unwrap();
+        let labels: Vec<&str> = hints
+            .iter()
+            .filter_map(|h| {
+                if let InlayHintLabel::String(s) = &h.label {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(labels.contains(&"initWithName:"), "expected 'initWithName:' hint, got: {labels:?}");
+        // `alloc` is nullary — no hint for it.
+        assert!(!labels.iter().any(|l| *l == "alloc:"), "unexpected 'alloc:' hint");
+    }
+
+    #[test]
+    fn range_filter_excludes_out_of_range_hints() {
+        // Two sends on separate lines; restrict hints to line 0 only.
+        let src = "void f(id a, id b, id c, id d) {\n[a setX:b];\n[c setY:d];\n}";
+        let file = parse(src);
+        let range = Range {
+            start: Position { line: 1, character: 0 },
+            end:   Position { line: 1, character: 100 },
+        };
+        let hints = inlay_hints(&file, Some(range)).unwrap();
+        // Only the first send (line 1) should appear; the second (line 2) must not.
+        assert!(!hints.is_empty(), "expected at least one hint for line 1");
+        for h in &hints {
+            assert_eq!(h.position.line, 1, "hint outside range: {h:?}");
+        }
+    }
 }
