@@ -60,7 +60,7 @@ pub fn format_document(path: &Path, source: &str) -> Result<Vec<TextEdit>> {
 fn run_clang_format(path: &Path, source: &str) -> Result<String> {
     // Try to find clang-format in PATH.
     let clang_format = find_clang_format();
-
+    tracing::debug!("run_clang_format: using {:?}", clang_format);
     let mut cmd = Command::new(&clang_format);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -107,12 +107,14 @@ fn run_clang_format(path: &Path, source: &str) -> Result<String> {
 /// Search order:
 ///   1. Homebrew LLVM: `/opt/homebrew/opt/llvm/bin/clang-format` (Apple Silicon)
 ///   2. Homebrew LLVM: `/usr/local/opt/llvm/bin/clang-format` (Intel)
-///   3. Xcode bundled: `/usr/bin/clang-format`
-///   4. Bare `clang-format` (rely on PATH)
+///   3. Xcode toolchain: `.../XcodeDefault.xctoolchain/usr/bin/clang-format`
+///   4. System: `/usr/bin/clang-format`
+///   5. Bare `clang-format` (rely on PATH)
 fn find_clang_format() -> String {
     let candidates = [
         "/opt/homebrew/opt/llvm/bin/clang-format",
         "/usr/local/opt/llvm/bin/clang-format",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-format",
         "/usr/bin/clang-format",
     ];
     for c in candidates {

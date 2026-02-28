@@ -199,3 +199,45 @@ crates/
 
 - **`type_hierarchy_provider` capability 限制**：`lsp-types` v0.97.0 的 `ServerCapabilities` 结构体不包含 `type_hierarchy_provider` 字段。Handler 已注册并可正常工作（客户端发送请求即可触发），但无法通过 capabilities 主动广告。未来可升级 `lsp-types` 或使用 `experimental` 字段解决。
 - **`clang_visitChildren` 签名**：`clang-sys` v1.8.1 期望普通函数指针（非 `Option`），已在实现中修正。
+- **VS Code 格式化注册**：`vscode-languageclient` v9 对自定义 language id 的 formatting 自动注册存在已知问题（microsoft/vscode#158760、microsoft/vscode-languageserver-node#1395），因此在 `extension.ts` 中手动调用 `vscode.languages.registerDocumentFormattingEditProvider()` 将格式化请求转发至 LSP 服务器。
+- **clang-format 路径发现**：`find_clang_format()` 按以下优先级查找：① Homebrew LLVM (Apple Silicon) → ② Homebrew LLVM (Intel) → ③ Xcode 工具链 (`/Applications/Xcode.app/.../XcodeDefault.xctoolchain/usr/bin/clang-format`) → ④ 系统 `/usr/bin/clang-format` → ⑤ PATH 中的 `clang-format`。
+
+---
+
+## 开发注意事项
+
+### ⚠️ 必须使用 Release 模式构建
+
+VS Code 用户设置中 `objc-lsp.serverPath` 指向 **release** 二进制：
+
+```
+"objc-lsp.serverPath": ".../target/release/objc-lsp"
+```
+
+因此每次修改 Rust 代码后，**必须使用 `--release` 构建**，否则 VS Code 仍会使用旧的 release 二进制，导致修改不生效：
+
+```bash
+# ✅ 正确：构建 release 模式
+cargo build --release --workspace
+
+# ❌ 错误：仅构建 debug 模式，VS Code 不会使用
+cargo build --workspace
+```
+
+完整的重新部署流程：
+
+```bash
+# 1. 构建 release 二进制
+cargo build --release --workspace
+
+# 2. 打包 VS Code 扩展（如修改了 TypeScript 代码）
+cd editors/vscode && npx vsce package --no-dependencies
+
+# 3. 安装扩展（如修改了 TypeScript 代码）
+code --install-extension objc-lsp-0.1.0.vsix --force
+
+# 4. 在 VS Code 中重新加载窗口
+# Cmd+Shift+P → "Developer: Reload Window"
+```
+
+如果只修改了 Rust 代码（未修改 TypeScript），只需执行步骤 1 和 4。

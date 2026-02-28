@@ -669,17 +669,25 @@ impl Server {
         let (id, params): (RequestId, DocumentFormattingParams) =
             req.extract(Formatting::METHOD)?;
         let uri = &params.text_document.uri;
+        tracing::info!("on_formatting: uri={:?}", uri.as_str());
 
         let result = if let (Some(path), Some(doc)) = (Self::uri_to_path(uri), self.documents.get(uri)) {
             match objc_semantic::formatting::format_document(&path, &doc.content) {
-                Ok(edits) if !edits.is_empty() => serde_json::to_value(edits)?,
-                Ok(_) => serde_json::Value::Null,
+                Ok(edits) if !edits.is_empty() => {
+                    tracing::info!("on_formatting: returning {} edit(s)", edits.len());
+                    serde_json::to_value(edits)?
+                }
+                Ok(_) => {
+                    tracing::info!("on_formatting: no changes needed");
+                    serde_json::Value::Null
+                }
                 Err(e) => {
                     tracing::warn!("formatting error: {e}");
                     serde_json::Value::Null
                 }
             }
         } else {
+            tracing::warn!("on_formatting: document not found for {:?}", uri.as_str());
             serde_json::Value::Null
         };
 

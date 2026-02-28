@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import {
+  DocumentFormattingRequest,
+} from "vscode-languageserver-protocol";
 import { startClient, stopClient, getClient, createStatusBar } from "./server";
 
 export async function activate(
@@ -8,7 +11,46 @@ export async function activate(
   createStatusBar(context);
 
   // Start the language server
-  await startClient(context);
+  const client = await startClient(context);
+
+  // ── Formatting provider ─────────────────────────────────────────────────
+  // Register a DocumentFormattingEditProvider manually so VS Code
+  // always sees us as a formatter, regardless of vscode-languageclient's
+  // automatic capability registration.
+  if (client) {
+    const selector: vscode.DocumentSelector = [
+      { language: "objective-c", scheme: "file" },
+      { language: "objective-cpp", scheme: "file" },
+    ];
+    context.subscriptions.push(
+      vscode.languages.registerDocumentFormattingEditProvider(selector, {
+        async provideDocumentFormattingEdits(
+          document: vscode.TextDocument,
+          options: vscode.FormattingOptions,
+          token: vscode.CancellationToken
+        ): Promise<vscode.TextEdit[]> {
+          const filesConfig = vscode.workspace.getConfiguration("files", document);
+          const params = {
+            textDocument: client.code2ProtocolConverter.asTextDocumentIdentifier(document),
+            options: client.code2ProtocolConverter.asFormattingOptions(options, {
+              trimTrailingWhitespace: filesConfig.get<boolean>("trimTrailingWhitespace"),
+              trimFinalNewlines: filesConfig.get<boolean>("trimFinalNewlines"),
+              insertFinalNewline: filesConfig.get<boolean>("insertFinalNewline"),
+            }),
+          };
+          const result = await client.sendRequest(
+            DocumentFormattingRequest.type,
+            params,
+            token
+          );
+          if (!result) {
+            return [];
+          }
+          return await client.protocol2CodeConverter.asTextEdits(result, token) ?? [];
+        },
+      })
+    );
+  }
 
   // ── Commands ──────────────────────────────────────────────────────────────
 
