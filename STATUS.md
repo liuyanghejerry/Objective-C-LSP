@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（修复 `.h` 文件 UIKit 类型识别：-fmodules 模块支持 + 前缀头注入；commit `5dbf267`）
+> 最后更新：2026-02-28（富化 ObjC SDK 符号 hover 信息：继承链、协议、方法签名、物理头文件注释回退；commit `33aae60`）
 
 ---
 
@@ -75,12 +75,12 @@
 |-------|--------|------|------|
 | `objc-syntax` | 26 unit + 14 integration = **40** | ✅ 全部通过 | inlay_hints, symbols, tokens, header_detect |
 | `objc-intelligence` | **43** | ✅ 全部通过 | selector, property, protocol, category, header_nav, code_actions, nullability |
-| `objc-semantic` | **5** | ✅ 全部通过 | hover (Apple SDK doc comment tests) |
+| `objc-semantic` | **8** | ✅ 全部通过 | hover (Apple SDK doc comment + extract_preceding_comment tests) |
 | `objc-lsp` | 0 | ✅ 二进制启动正常 | 尚无测试用例 |
 | `objc-project` | **13** | ✅ 全部通过 | sdk flags, synthetic pod headers, cocoapods fallback |
 | `objc-store` | **12** | ✅ 全部通过 | upsert_file, find_symbols_by_name, search_symbols |
 
-> `cargo test --workspace` 全部通过（**113 tests**，零 failure）。libclang 路径通过 `.cargo/config.toml` 固化，无需手动设置环境变量。
+> `cargo test --workspace` 全部通过（**116 tests**，零 failure）。libclang 路径通过 `.cargo/config.toml` 固化，无需手动设置环境变量。
 ---
 
 ## 目录结构（实际 vs 规划）
@@ -160,6 +160,7 @@ crates/
 | F5 | 合成 Pod 头文件目录：无 `Pods/` 时扫描源树创建平铺 symlink 目录，解决 `#import <PodName/Header.h>` 报红 | ✅ 完成 (`4af5afa`) |
 | F6 | `.h` 文件全功能 LSP：修复 documentSelector / languageId / `-x objective-c-header` 三处缺失 | ✅ 完成 (`907ff28`) |
 | F7 | UIKit 类型识别（UIViewController 等）：`-fmodules` + 项目前缀头（`.pch`）注入 | ✅ 完成 (`5dbf267`) |
+| F8 | 富化 SDK 符号 hover：继承链/协议列表/方法签名/@property 属性 + 物理头注释回退 | ✅ 完成 (`33aae60`) |
 
 ### 修复详情
 
@@ -169,3 +170,4 @@ crates/
 - **框架式 import 根因（F5）**：`#import <SAKIdentityCardRecognizer/SPKNfcIdentifyCommand.h>` 需要 CocoaPods 平铺目录结构（`PodName/Foo.h`），但 `pod install` 未运行时 `Pods/` 不存在。无法用单个 `-I parent/` 解决，因为头文件实际路径有多层嵌套。**修复**：在 `/tmp/objc-lsp-headers/<hash>/` 下建立 symlink 镜像（`PodName/Foo.h → 实际路径`），并将该目录作为 `-I` 传入 libclang。外部 Pod 仍会报 "file not found"（正确行为，需 `pod install`）。
 - **`.h` 文件 LSP 不响应根因（F6）**：三处联合缺失：① VS Code 将 `.h` 识别为 `c` 语言 id 而非 `objective-c`；② extension `documentSelector` 未覆盖 `**/*.h`；③ libclang 以纯 C 解析 `.h`，未传 `-x objective-c-header`。三处同步修复。
 - **UIKit 类型未知根因（F7）**：`.h` 文件通常只写 `#import <Foundation/Foundation.h>`，而 `UIViewController` 等 UIKit 类型由 Xcode 全局注入前缀头（`GCC_PREFIX_HEADER` .pch）及 `-fmodules` 提供。**修复 A**：`find_ios_simulator_sdk()` 追加 `-fmodules -fmodule-cache-path /tmp/objc-lsp-module-cache`，与 Xcode `CLANG_ENABLE_MODULES=YES` 一致。**修复 B**：`workspace_include_flags()` 扫描工作区（最多 3 层，跳过 Pods/build/DerivedData），找含 `#import <UIKit` 的 `.pch` 并追加 `-include <path>`，复现 Xcode 前缀头全局注入效果。
+- **SDK hover 富化根因（F8）**：`-fmodules` 下 `clang_Cursor_getBriefCommentText` 对来自 PCM 缓存的声明返回空字符串（注释未存入编译好的模块）；且旧 hover 只显示类型名，不展示继承链/协议/方法签名。**修复 A**（富签名）：`hover_at()` 先调用 `clang_getCursorReferenced()` 解析引用到声明，再按 cursor kind 分发到专用构建函数：`@interface` 用 `clang_visitChildren` 收集 `ObjCSuperClassRef`/`ObjCProtocolRef` 子节点；方法用 `clang_getCursorResultType` + `ParmDecl` 迭代构建完整带类型签名；`@property` 用 `clang_Cursor_getObjCPropertyAttributes` 读取属性位掩码。**修复 B**（物理头注释回退）：三级策略：① `clang_Cursor_getBriefCommentText`；② `clang_Cursor_getRawCommentText`；③ 通过 `clang_getSpellingLocation` 获取物理 `.h` 文件路径，从磁盘读取并从声明行向上扫描 `/*!`/`/**`/`///`/`//!` 注释块。
