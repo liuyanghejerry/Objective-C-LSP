@@ -16,6 +16,7 @@
     "Programming Languages",
     "Formatters",
     "Linters",
+    "Snippets",
     "Other"
   ],
   "keywords": [
@@ -104,6 +105,40 @@
       {
         "command": "objc-lsp.reportIssue",
         "title": "ObjC: Report an Issue"
+      },
+      {
+        "command": "objc-lsp.addProperty",
+        "title": "ObjC: Generate @property from ivar"
+      },
+      {
+        "command": "objc-lsp.wrapAutoreleasepool",
+        "title": "ObjC: Wrap in @autoreleasepool"
+      },
+      {
+        "command": "objc-lsp.wrapDispatchAsync",
+        "title": "ObjC: Wrap in dispatch_async (main queue)"
+      },
+      {
+        "command": "objc-lsp.addSynthesize",
+        "title": "ObjC: Add @synthesize"
+      },
+      {
+        "command": "objc-lsp.fixRetainCycle",
+        "title": "ObjC: Fix Retain Cycle (add weakSelf)"
+      },
+      {
+        "command": "objc-lsp.extractMethod",
+        "title": "ObjC: Extract Method"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "objective-c",
+        "path": "./snippets/objc.json"
+      },
+      {
+        "language": "objective-cpp",
+        "path": "./snippets/objc.json"
       }
     ]
   },

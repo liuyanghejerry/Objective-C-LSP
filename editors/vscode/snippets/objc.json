@@ -1,0 +1,239 @@
+{
+  "Property (strong)": {
+    "prefix": "prop",
+    "body": [
+      "@property (nonatomic, strong) ${1:NSObject} *${2:name};"
+    ],
+    "description": "Declare a strong nonatomic property"
+  },
+  "Property (copy)": {
+    "prefix": "propn",
+    "body": [
+      "@property (nonatomic, copy) ${1:NSString} *${2:name};"
+    ],
+    "description": "Declare a copy nonatomic property (for NSString, NSArray, etc.)"
+  },
+  "Property (weak)": {
+    "prefix": "propw",
+    "body": [
+      "@property (nonatomic, weak) ${1:id<${2:Protocol}>} ${3:delegate};"
+    ],
+    "description": "Declare a weak nonatomic property (for delegates)"
+  },
+  "Property (assign)": {
+    "prefix": "propa",
+    "body": [
+      "@property (nonatomic, assign) ${1:NSInteger} ${2:name};"
+    ],
+    "description": "Declare an assign nonatomic property (for primitives)"
+  },
+  "Property (readonly)": {
+    "prefix": "propr",
+    "body": [
+      "@property (nonatomic, readonly) ${1:NSObject} *${2:name};"
+    ],
+    "description": "Declare a readonly nonatomic property"
+  },
+  "Singleton": {
+    "prefix": "singleton",
+    "body": [
+      "+ (instancetype)shared${1:Manager} {",
+      "    static ${2:${TM_FILENAME_BASE}} *instance = nil;",
+      "    static dispatch_once_t onceToken;",
+      "    dispatch_once(&onceToken, ^{",
+      "        instance = [[self alloc] init];",
+      "    });",
+      "    return instance;",
+      "}"
+    ],
+    "description": "dispatch_once singleton pattern"
+  },
+  "weakSelf": {
+    "prefix": "weakSelf",
+    "body": [
+      "__weak typeof(self) weakSelf = self;"
+    ],
+    "description": "Declare weakSelf to avoid retain cycles in blocks"
+  },
+  "strongSelf": {
+    "prefix": "strongSelf",
+    "body": [
+      "__strong typeof(weakSelf) strongSelf = weakSelf;",
+      "if (!strongSelf) return;"
+    ],
+    "description": "Promote weakSelf to strongSelf with nil guard"
+  },
+  "Block typedef": {
+    "prefix": "block",
+    "body": [
+      "typedef void (^${1:CompletionBlock})(${2:BOOL success, NSError *error});"
+    ],
+    "description": "typedef a block type"
+  },
+  "Block property": {
+    "prefix": "blockprop",
+    "body": [
+      "@property (nonatomic, copy) void (^${1:completionBlock})(${2:BOOL success, NSError *error});"
+    ],
+    "description": "Declare a block property (copy)"
+  },
+  "Block inline": {
+    "prefix": "blocki",
+    "body": [
+      "^${1:void}(${2:}) {",
+      "    ${0}",
+      "};"
+    ],
+    "description": "Inline block literal"
+  },
+  "Protocol": {
+    "prefix": "protocol",
+    "body": [
+      "@protocol ${1:ProtocolName} <NSObject>",
+      "",
+      "@required",
+      "- (void)${2:requiredMethod};",
+      "",
+      "@optional",
+      "- (void)${3:optionalMethod};",
+      "",
+      "@end"
+    ],
+    "description": "Full @protocol declaration template"
+  },
+  "Implementation": {
+    "prefix": "implem",
+    "body": [
+      "@implementation ${1:${TM_FILENAME_BASE}}",
+      "",
+      "${0}",
+      "",
+      "@end"
+    ],
+    "description": "@implementation ... @end template"
+  },
+  "Interface": {
+    "prefix": "interface",
+    "body": [
+      "@interface ${1:${TM_FILENAME_BASE}} : ${2:NSObject}",
+      "",
+      "${0}",
+      "",
+      "@end"
+    ],
+    "description": "@interface ... @end declaration template"
+  },
+  "Interface with category": {
+    "prefix": "category",
+    "body": [
+      "@interface ${1:${TM_FILENAME_BASE}} (${2:CategoryName})",
+      "",
+      "${0}",
+      "",
+      "@end"
+    ],
+    "description": "@interface class category template"
+  },
+  "Class extension": {
+    "prefix": "extension",
+    "body": [
+      "@interface ${1:${TM_FILENAME_BASE}} ()",
+      "",
+      "${0}",
+      "",
+      "@end"
+    ],
+    "description": "Class extension (anonymous category) template"
+  },
+  "if weakSelf guard": {
+    "prefix": "ifweak",
+    "body": [
+      "if (!weakSelf) return${1:};"
+    ],
+    "description": "Guard clause for nil weakSelf"
+  },
+  "dispatch_async main": {
+    "prefix": "dispatch_main",
+    "body": [
+      "dispatch_async(dispatch_get_main_queue(), ^{",
+      "    ${0}",
+      "});"
+    ],
+    "description": "dispatch_async to main queue"
+  },
+  "dispatch_async background": {
+    "prefix": "dispatch_bg",
+    "body": [
+      "dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{",
+      "    ${0}",
+      "});"
+    ],
+    "description": "dispatch_async to background queue"
+  },
+  "autoreleasepool": {
+    "prefix": "autorelease",
+    "body": [
+      "@autoreleasepool {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "@autoreleasepool block"
+  },
+  "@synthesize": {
+    "prefix": "synthesize",
+    "body": [
+      "@synthesize ${1:property} = _${1:property};"
+    ],
+    "description": "@synthesize property = _property"
+  },
+  "NSLog": {
+    "prefix": "nslog",
+    "body": [
+      "NSLog(@\"${1:%@}\", ${2:object});"
+    ],
+    "description": "NSLog format string"
+  },
+  "Init method": {
+    "prefix": "init",
+    "body": [
+      "- (instancetype)init {",
+      "    self = [super init];",
+      "    if (self) {",
+      "        ${0}",
+      "    }",
+      "    return self;",
+      "}"
+    ],
+    "description": "Standard init method pattern"
+  },
+  "Dealloc method": {
+    "prefix": "dealloc",
+    "body": [
+      "- (void)dealloc {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "dealloc method"
+  },
+  "Pragma mark": {
+    "prefix": "pragma",
+    "body": [
+      "#pragma mark - ${1:Section Name}",
+      ""
+    ],
+    "description": "#pragma mark section divider"
+  },
+  "Try-catch": {
+    "prefix": "trycatch",
+    "body": [
+      "@try {",
+      "    ${1}",
+      "} @catch (NSException *exception) {",
+      "    ${2:NSLog(@\"Exception: %@\", exception);}",
+      "} @finally {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "@try/@catch/@finally block"
+  }
+}
