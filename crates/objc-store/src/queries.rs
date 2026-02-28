@@ -43,6 +43,13 @@ impl IndexStore {
             .map_err(Into::into)
     }
 
+    /// List all file paths currently in the store.
+    pub fn list_all_file_paths(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare_cached("SELECT path FROM files ORDER BY path")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<String>>>().map_err(Into::into)
+    }
+
     /// Fuzzy-search symbols by name prefix (for workspace/symbol).
     pub fn search_symbols(&self, query: &str) -> Result<Vec<SymbolRecord>> {
         let pattern = format!("{query}%");
@@ -243,5 +250,23 @@ mod tests {
         insert_symbol(&s, fid, "Beta", "class", None, 2, 0);
         let results = s.search_symbols("").unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn list_all_file_paths_empty() {
+        let s = store();
+        let paths = s.list_all_file_paths().unwrap();
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn list_all_file_paths_returns_all() {
+        let s = store();
+        s.upsert_file("/a.m", 0).unwrap();
+        s.upsert_file("/b.m", 0).unwrap();
+        s.upsert_file("/c/Foo.m", 0).unwrap();
+        let mut paths = s.list_all_file_paths().unwrap();
+        paths.sort();
+        assert_eq!(paths, vec!["/a.m", "/b.m", "/c/Foo.m"]);
     }
 }

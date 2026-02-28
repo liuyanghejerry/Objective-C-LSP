@@ -159,6 +159,124 @@ impl ClangIndex {
             ..Default::default()
         }))
     }
+    /// Rename across all currently-parsed translation units.
+    ///
+    /// Resolves the rename target from `path`/`pos`, then searches every
+    /// open TU for references, building a multi-file `WorkspaceEdit`.
+    /// Falls back to single-file if the primary TU is not loaded.
+    pub fn rename_across_all_files(
+        &self,
+        path: &Path,
+        pos: Position,
+        new_name: &str,
+    ) -> Result<Option<WorkspaceEdit>> {
+        let units = self.units.lock().unwrap();
+        let primary_tu = match units.get(path) {
+            Some(tu) => *tu,
+            None => return Ok(None),
+        };
+
+        // Resolve target cursor from primary file.
+        let cx_primary = unsafe { clang_getFile(primary_tu, path_to_cstr(path).as_ptr()) };
+        let loc = unsafe { clang_getLocation(primary_tu, cx_primary, pos.line + 1, pos.character + 1) };
+        let cursor = unsafe { clang_getCursor(primary_tu, loc) };
+        if unsafe { clang_Cursor_isNull(cursor) } != 0 {
+            return Ok(None);
+        }
+
+        // Canonicalize to definition.
+        let referenced = unsafe { clang_getCursorReferenced(cursor) };
+        let target = if unsafe { clang_Cursor_isNull(referenced) } != 0 {
+            cursor
+        } else {
+            referenced
+        };
+
+        let kind = unsafe { clang_getCursorKind(target) };
+        let is_property = kind == CXCursor_ObjCPropertyDecl;
+        let old_name = cx_string_owned(unsafe { clang_getCursorSpelling(target) });
+
+        // Collect edits across all parsed TUs.
+        let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
+
+        // Collect the list of (path, tu) pairs first to avoid borrow issues.
+        let all_tus: Vec<(std::path::PathBuf, CXTranslationUnit)> =
+            units.iter().map(|(p, tu)| (p.clone(), *tu)).collect();
+        drop(units);  // release the lock before unsafe libclang calls
+
+        for (tu_path, tu) in &all_tus {
+            let cx_file = unsafe {
+                clang_getFile(*tu, path_to_cstr(tu_path).as_ptr())
+            };
+            if cx_file.is_null() {
+                continue;
+            }
+
+            let mut raw_refs: Vec<(CXCursor, CXSourceRange)> = Vec::new();
+            let visitor = CXCursorAndRangeVisitor {
+                context: &mut raw_refs as *mut Vec<(CXCursor, CXSourceRange)> as *mut _,
+                visit: Some(visit_with_cursor),
+            };
+            unsafe { clang_findReferencesInFile(target, cx_file, visitor) };
+
+            for (ref_cursor, ref_range) in &raw_refs {
+                let ref_kind = unsafe { clang_getCursorKind(*ref_cursor) };
+                let replacement = if is_property {
+                    derive_property_replacement(&old_name, new_name, ref_kind)
+                } else {
+                    new_name.to_owned()
+                };
+
+                let start = unsafe { clang_getRangeStart(*ref_range) };
+                let end = unsafe { clang_getRangeEnd(*ref_range) };
+                let start_pos = spelling_pos(start);
+                let end_pos = spelling_pos(end);
+
+                // Determine the file this reference is in.
+                let mut ref_file: CXFile = std::ptr::null_mut();
+                let mut ref_line: u32 = 0;
+                let mut ref_col: u32 = 0;
+                unsafe {
+                    clang_getSpellingLocation(
+                        start,
+                        &mut ref_file,
+                        &mut ref_line,
+                        &mut ref_col,
+                        std::ptr::null_mut(),
+                    );
+                };
+                if ref_file.is_null() {
+                    continue;
+                }
+                let cx_name = unsafe { clang_getFileName(ref_file) };
+                let file_name = cx_string_owned(cx_name);
+                if file_name.is_empty() {
+                    continue;
+                }
+                let uri: Uri = match format!("file://{file_name}").parse() {
+                    Ok(u) => u,
+                    Err(_) => continue,
+                };
+
+                changes
+                    .entry(uri)
+                    .or_default()
+                    .push(TextEdit {
+                        range: Range { start: start_pos, end: end_pos },
+                        new_text: replacement,
+                    });
+            }
+        }
+
+        if changes.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }))
+    }
 }
 
 // ---------------------------------------------------------------------------

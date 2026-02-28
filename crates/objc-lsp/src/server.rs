@@ -473,7 +473,7 @@ impl Server {
         let new_name = &params.new_name;
 
         let result = if let Some(path) = Self::uri_to_path(uri) {
-            match self.clang_index.rename_at(&path, pos, new_name) {
+            match self.clang_index.rename_across_all_files(&path, pos, new_name) {
                 Ok(Some(edit)) => serde_json::to_value(edit)?,
                 Ok(None) => serde_json::Value::Null,
                 Err(e) => {
