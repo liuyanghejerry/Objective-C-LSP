@@ -39,6 +39,21 @@ struct Document {
 }
 
 /// All server state.
+/// Client-supplied options from `initializationOptions`.
+#[derive(Debug, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct InitOptions {
+    log_level: Option<String>,
+    extra_compiler_flags: Option<Vec<String>>,
+    #[serde(default = "bool_true")]
+    enable_nullability_checks: bool,
+    #[serde(default)]
+    enable_static_analyzer: bool,
+}
+
+fn bool_true() -> bool { true }
+
+/// All server state.
 pub struct Server {
     connection: Connection,
     documents: HashMap<Uri, Document>,
@@ -49,12 +64,17 @@ pub struct Server {
     flag_resolver: Option<Arc<dyn FlagResolver>>,
     /// Default SDK / GNUstep include flags (always prepended).
     base_flags: Vec<String>,
+    /// Extra flags forwarded from VS Code settings.
+    extra_flags: Vec<String>,
     /// Workspace-wide symbol index.
     store: Arc<IndexStore>,
+    /// Feature flags from client initializationOptions.
+    enable_nullability_checks: bool,
+    enable_static_analyzer: bool,
 }
 
 impl Server {
-    fn new(connection: Connection, workspace_root: Option<PathBuf>) -> Result<Self> {
+    fn new(connection: Connection, workspace_root: Option<PathBuf>, opts: InitOptions) -> Result<Self> {
         // Best-effort: load compile_commands.json from the workspace root.
         let flag_resolver: Option<Arc<dyn FlagResolver>> = workspace_root
             .as_deref()
@@ -74,14 +94,17 @@ impl Server {
             clang_index,
             flag_resolver,
             base_flags,
+            extra_flags: opts.extra_compiler_flags.unwrap_or_default(),
             store,
+            enable_nullability_checks: opts.enable_nullability_checks,
+            enable_static_analyzer: opts.enable_static_analyzer,
         })
     }
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
-    /// Resolve compilation flags for a file: compile_db flags + base SDK flags.
+    /// Resolve compilation flags for a file: compile_db flags + base SDK flags + extra flags.
     fn flags_for(&self, path: &Path) -> Vec<String> {
         let mut flags = self.base_flags.clone();
         if let Some(resolver) = &self.flag_resolver {
@@ -89,6 +112,7 @@ impl Server {
                 flags.extend(cf.args);
             }
         }
+        flags.extend(self.extra_flags.clone());
         flags
     }
 
@@ -591,16 +615,20 @@ impl Server {
                             vec![]
                         }
                     };
-                    // Merge static analyzer diagnostics.
-                    match self.clang_index.analyzer_diagnostics_for(&path, &flags) {
-                        Ok(analyzer_diags) => diags.extend(analyzer_diags),
-                        Err(e) => tracing::debug!("analyzer skipped: {e}"),
+                    // Merge static analyzer diagnostics (gated by config).
+                    if self.enable_static_analyzer {
+                        match self.clang_index.analyzer_diagnostics_for(&path, &flags) {
+                            Ok(analyzer_diags) => diags.extend(analyzer_diags),
+                            Err(e) => tracing::debug!("analyzer skipped: {e}"),
+                        }
                     }
-                    // Merge nullability diagnostics (tree-sitter / text-based).
-                    let ext = path.extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("");
-                    diags.extend(nullability_diagnostics(content, ext));
+                    // Merge nullability diagnostics (gated by config).
+                    if self.enable_nullability_checks {
+                        let ext = path.extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("");
+                        diags.extend(nullability_diagnostics(content, ext));
+                    }
                     diags
                 }
                 Err(e) => {
@@ -684,7 +712,19 @@ pub fn run(connection: Connection) -> Result<()> {
         "initialized"
     );
 
-    let mut server = Server::new(connection, workspace_root)?;
+    // Parse initializationOptions forwarded by the VS Code extension.
+    let opts: InitOptions = init_params
+        .initialization_options
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    tracing::info!(
+        nullability = opts.enable_nullability_checks,
+        static_analyzer = opts.enable_static_analyzer,
+        extra_flags = ?opts.extra_compiler_flags,
+        "initializationOptions applied"
+    );
+
+    let mut server = Server::new(connection, workspace_root, opts)?;
 
     // Main message loop.
     loop {

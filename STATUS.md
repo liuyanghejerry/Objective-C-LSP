@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（Phase 4 VS Code 扩展全部 8/8 功能完成）
+> 最后更新：2026-02-28（Phase 4 完成；git 清理、initializationOptions 接入、.vsix 打包并安装至 VS Code）
 
 ---
 
@@ -144,3 +144,5 @@ crates/
 | 30 | initializationOptions 传递用户设置给 objc-lsp | ✅ 完成 |
 
 **Phase 4 提交**:
+- `1c308b5` — feat(Phase4): VS Code extension — all 8 features (#23–#30)
+- `e147c66` — chore: untrack node_modules and dist, add .gitignore for vscode extension
