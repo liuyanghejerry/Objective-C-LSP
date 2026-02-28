@@ -1,0 +1,23 @@
+# Rust
+/target/
+Cargo.lock
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+
+# SQLite index files
+*.db
+*.db-shm
+*.db-wal
