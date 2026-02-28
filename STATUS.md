@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28
+> 最后更新：2026-02-28（Phase 3 #18, #20 完成）
 
 ---
 
@@ -10,7 +10,7 @@
 |-------|------|--------|
 | Phase 1 — 核心骨架（MVP） | ✅ 完成 | 8/8 功能 |
 | Phase 2 — ObjC 专属功能 | ✅ 完成 | 7/7 功能 |
-| Phase 3 — 高级功能 | ⏳ 未开始 | 0/7 功能 |
+| Phase 3 — 高级功能 | 🚧 进行中 | 2/7 功能 |
 
 ---
 
@@ -54,15 +54,15 @@
 
 ---
 
-## Phase 3 — 高级功能（待规划）
+## Phase 3 — 高级功能
 
 | # | 功能 | 状态 |
 |---|------|------|
 | 16 | `clang --analyze` 集成 | ⏳ 未开始 |
 | 17 | Nullability 检查 | ⏳ 未开始 |
-| 18 | 代码操作（生成 interface/implementation pair 等） | ⏳ 未开始 |
+| 18 | 代码操作（生成 interface/implementation pair 等） | ✅ 完成 |
 | 19 | Apple SDK 文档（解析 SDK 头文件 `/*!` 注释） | ⏳ 未开始 |
-| 20 | 全局符号搜索 | ⏳ 未开始 |
+| 20 | 全局符号搜索 | ✅ 完成 |
 | 21 | GNUstep 支持 | ⏳ 未开始 |
 | 22 | 完整跨文件 selector rename | ⏳ 未开始 |
 
@@ -72,14 +72,14 @@
 
 | Crate | 测试数 | 状态 | 备注 |
 |-------|--------|------|------|
-| `objc-syntax` | 18 unit + 14 integration = **32** | ✅ 全部通过 | |
-| `objc-intelligence` | **5** | ✅ 全部通过 | |
+| `objc-syntax` | 26 unit + 14 integration = **40** | ✅ 全部通过 | inlay_hints, symbols, tokens, header_detect |
+| `objc-intelligence` | **36** | ✅ 全部通过 | selector, property, protocol, category, header_nav, code_actions |
 | `objc-semantic` | 0 | ✅ 二进制启动正常 | 尚无测试用例 |
 | `objc-lsp` | 0 | ✅ 二进制启动正常 | 尚无测试用例 |
-| `objc-project` | 0 | — | 尚无测试 |
-| `objc-store` | 0 | — | 尚无测试 |
+| `objc-project` | **8** | ✅ 全部通过 | shell_words_split (compile_db) |
+| `objc-store` | **10** | ✅ 全部通过 | upsert_file, find_symbols_by_name, search_symbols |
 
-> `cargo test --workspace` 全部通过（零 failure）。libclang 路径通过 `.cargo/config.toml` 固化，无需手动设置环境变量。
+> `cargo test --workspace` 全部通过（94 tests，零 failure）。libclang 路径通过 `.cargo/config.toml` 固化，无需手动设置环境变量。
 ---
 
 ## 目录结构（实际 vs 规划）
@@ -88,9 +88,9 @@
 crates/
 ├── objc-lsp/src/
 │   ├── main.rs            ✅
-│   ├── server.rs          ✅  Phase 1 & 2 handlers 全部接入
-│   ├── capabilities.rs    ✅  Phase 1 & 2 capabilities 全部声明
-│   └── dispatch.rs        ✅
+│   ├── dispatch.rs        ✅
+│   ├── server.rs          ✅  Phase 1, 2 & 3 handlers 全部接入（含 workspace/symbol、code actions）
+│   ├── capabilities.rs    ✅  Phase 1, 2 & 3 capabilities 全部声明
 ├── objc-syntax/src/
 │   ├── parser.rs          ✅
 │   ├── symbols.rs         ✅  含 aggregate_categories()
@@ -111,9 +111,14 @@ crates/
 ├── objc-intelligence/src/
 │   ├── selector.rs        ✅
 │   ├── property.rs        ✅
+│   ├── code_actions.rs    ✅  Phase 3 新增（syntax-based code actions）
 │   └── lib.rs             ✅
 ├── objc-project/src/      ✅  骨架已建立
-└── objc-store/src/        ✅  骨架已建立
+└── objc-store/src/        ✅  含 SymbolInput, index_file_symbols() — Phase 3 新增
 ```
+
+**Phase 3 提交**：
+- `662a193` — feat(Phase3-#20): workspace/symbol
+- `b0c8a80` — feat(Phase3-#18): code actions
 
 规划中尚未创建的文件：`header_nav.rs`、`category.rs`（逻辑已内联到 `symbols.rs`）、`protocol.rs`（逻辑已内联到 `protocol_stubs.rs`）、tree-sitter `.scm` 查询文件（目前以 Rust 代码直接遍历 AST 代替）。
