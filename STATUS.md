@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（Phase 4 完成；git 清理、initializationOptions 接入、.vsix 打包并安装至 VS Code）
+> 最后更新：2026-02-28（crash 隔离 + iOS SDK 检测 + CocoaPods 头文件发现；commit `69cf39c`）
 
 ---
 
@@ -146,3 +146,20 @@ crates/
 **Phase 4 提交**:
 - `1c308b5` — feat(Phase4): VS Code extension — all 8 features (#23–#30)
 - `e147c66` — chore: untrack node_modules and dist, add .gitignore for vscode extension
+
+---
+
+## 崩溃修复（Post Phase 4）
+
+| # | 修复 | 状态 |
+|---|------|------|
+| F1 | DYLD_LIBRARY_PATH 注入（`@@HOMEBREW_PREFIX@@` dylib 安装名问题） | ✅ 完成 (`d3fb675`) |
+| F2 | 崩溃隔离：`crash_guard` 模块（`sigsetjmp/siglongjmp` 保护 `clang_parseTranslationUnit`） | ✅ 完成 (`69cf39c`) |
+| F3 | iOS SDK 检测：读取 Podfile/podspec/pbxproj，自动切换 iPhoneSimulator SDK | ✅ 完成 (`69cf39c`) |
+| F4 | CocoaPods 头文件路径发现：自动添加 `Pods/Headers/Public/` 子目录 `-I` flags | ✅ 完成 (`69cf39c`) |
+
+### 修复详情
+
+- **根本原因**：`@@HOMEBREW_PREFIX@@` 是 Homebrew LLVM 的 dylib 安装名，`LC_RPATH` 不足以让 dyld 找到它，必须显式设置 `DYLD_LIBRARY_PATH`。
+- **iOS SIGSEGV 根因**：项目目标是 iOS，但 `default_include_flags()` 使用 macOS SDK；`CoreNFC` 等框架不存在于 macOS SDK，导致 libclang 在 `clang_parseTranslationUnit` 中 SIGSEGV。
+- **修复策略**：双保险 — 先检测 iOS 项目并切换 SDK（根治），再用 `sigsetjmp/siglongjmp` guard 防止任何残余崩溃杀死进程。
