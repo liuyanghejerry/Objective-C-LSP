@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（Phase 3 #16, #18, #20, #22 完成）
+> 最后更新：2026-02-28（Phase 3 全部 7/7 功能完成）
 
 ---
 
@@ -10,7 +10,7 @@
 |-------|------|--------|
 | Phase 1 — 核心骨架（MVP） | ✅ 完成 | 8/8 功能 |
 | Phase 2 — ObjC 专属功能 | ✅ 完成 | 7/7 功能 |
-| Phase 3 — 高级功能 | 🚧 进行中 | 4/7 功能 |
+| Phase 3 — 高级功能 | ✅ 完成 | 7/7 功能 |
 
 ---
 
@@ -59,11 +59,11 @@
 | # | 功能 | 状态 |
 |---|------|------|
 | 16 | `clang --analyze` 集成 | ✅ 完成 |
-| 17 | Nullability 检查 | ⏳ 未开始 |
+| 17 | Nullability 检查 | ✅ 完成 |
 | 18 | 代码操作（生成 interface/implementation pair 等） | ✅ 完成 |
-| 19 | Apple SDK 文档（解析 SDK 头文件 `/*!` 注释） | ⏳ 未开始 |
+| 19 | Apple SDK 文档（解析 SDK 头文件 `/*!` 注释） | ✅ 完成 |
 | 20 | 全局符号搜索 | ✅ 完成 |
-| 21 | GNUstep 支持 | ⏳ 未开始 |
+| 21 | GNUstep 支持 | ✅ 完成 |
 | 22 | 完整跨文件 selector rename | ✅ 完成 |
 
 ---
@@ -73,13 +73,13 @@
 | Crate | 测试数 | 状态 | 备注 |
 |-------|--------|------|------|
 | `objc-syntax` | 26 unit + 14 integration = **40** | ✅ 全部通过 | inlay_hints, symbols, tokens, header_detect |
-| `objc-intelligence` | **36** | ✅ 全部通过 | selector, property, protocol, category, header_nav, code_actions |
-| `objc-semantic` | 0 | ✅ 二进制启动正常 | 尚无测试用例 |
+| `objc-intelligence` | **43** | ✅ 全部通过 | selector, property, protocol, category, header_nav, code_actions, nullability |
+| `objc-semantic` | **5** | ✅ 全部通过 | hover (Apple SDK doc comment tests) |
 | `objc-lsp` | 0 | ✅ 二进制启动正常 | 尚无测试用例 |
 | `objc-project` | **8** | ✅ 全部通过 | shell_words_split (compile_db) |
-| `objc-store` | **10** | ✅ 全部通过 | upsert_file, find_symbols_by_name, search_symbols |
+| `objc-store` | **12** | ✅ 全部通过 | upsert_file, find_symbols_by_name, search_symbols |
 
-> `cargo test --workspace` 全部通过（96 tests，零 failure）。libclang 路径通过 `.cargo/config.toml` 固化，无需手动设置环境变量。
+> `cargo test --workspace` 全部通过（**111 tests**，零 failure）。libclang 路径通过 `.cargo/config.toml` 固化，无需手动设置环境变量。
 ---
 
 ## 目录结构（实际 vs 规划）
@@ -122,5 +122,7 @@ crates/
 - `b0c8a80` — feat(Phase3-#18): code actions
 - `b26e888` — feat(Phase3-#22): cross-file selector rename
 - `8b78787` — feat(#16): clang static analyzer diagnostics
-
+- `48b1ab2` — feat(#17): nullability checker
+- `27036d0` — feat(#19): Apple SDK doc comment rendering in hover
+- `c6e4df6` — feat(#21): GNUstep support with 3-strategy detection
 规划中尚未创建的文件：`header_nav.rs`、`category.rs`（逻辑已内联到 `symbols.rs`）、`protocol.rs`（逻辑已内联到 `protocol_stubs.rs`）、tree-sitter `.scm` 查询文件（目前以 Rust 代码直接遍历 AST 代替）。
