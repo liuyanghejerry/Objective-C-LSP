@@ -136,7 +136,7 @@ fn build_gnustep_flags(root: &std::path::Path) -> Option<Vec<String>> {
     if flags.is_empty() { None } else { Some(flags) }
 }
 
-/// Best-effort list of include flags for the current environment.
+/// Best-effort list of include flags for the current environment (macOS default).
 pub fn default_include_flags() -> Vec<String> {
     let mut flags = Vec::new();
 
@@ -144,6 +144,192 @@ pub fn default_include_flags() -> Vec<String> {
         flags.extend(sdk.flags);
     } else if let Some(gnustep) = find_gnustep_flags() {
         flags.extend(gnustep);
+    }
+
+    flags
+}
+
+/// Detect the target platform from a workspace root and return the best set
+/// of compiler flags (SDK sysroot + CocoaPods headers + GNUstep fallback).
+///
+/// Detection priority:
+/// 1. `compile_commands.json` is preferred (caller handles that via FlagResolver).
+/// 2. `Podfile` with `platform :ios` → iPhoneSimulator SDK
+/// 3. `.xcodeproj` SDKROOT hint → iPhoneSimulator or macOS SDK
+/// 4. macOS SDK fallback
+#[cfg(target_os = "macos")]
+pub fn workspace_include_flags(workspace_root: Option<&std::path::Path>) -> Vec<String> {
+    let mut flags = Vec::new();
+
+    // Detect iOS vs macOS from Podfile / xcodeproj.
+    let is_ios = workspace_root.map(detect_ios_project).unwrap_or(false);
+
+    if is_ios {
+        if let Some(sdk) = find_ios_simulator_sdk() {
+            flags.extend(sdk.flags);
+        } else if let Some(sdk) = find_macos_sdk() {
+            // Fallback: macOS SDK is better than nothing.
+            flags.extend(sdk.flags);
+        }
+    } else if let Some(sdk) = find_macos_sdk() {
+        flags.extend(sdk.flags);
+    } else if let Some(gnustep) = find_gnustep_flags() {
+        flags.extend(gnustep);
+    }
+
+    // Add CocoaPods public headers if Pods/ directory exists.
+    if let Some(root) = workspace_root {
+        flags.extend(cocoapods_flags(root));
+    }
+
+    flags
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn workspace_include_flags(workspace_root: Option<&std::path::Path>) -> Vec<String> {
+    let mut flags = Vec::new();
+    if let Some(gnustep) = find_gnustep_flags() {
+        flags.extend(gnustep);
+    }
+    if let Some(root) = workspace_root {
+        flags.extend(cocoapods_flags(root));
+    }
+    flags
+}
+
+/// Attempt to locate the iPhone Simulator SDK via `xcrun`.
+/// Using the simulator SDK avoids needing a connected device.
+#[cfg(target_os = "macos")]
+pub fn find_ios_simulator_sdk() -> Option<SdkInfo> {
+    let output = std::process::Command::new("xcrun")
+        .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let path = String::from_utf8(output.stdout).ok()?;
+    let sdk_root = PathBuf::from(path.trim());
+
+    Some(SdkInfo {
+        flags: vec![
+            "-isysroot".to_owned(),
+            sdk_root.to_string_lossy().into_owned(),
+            // iOS simulator arch
+            "-arch".to_owned(),
+            "arm64".to_owned(),
+            // Suppress warnings about non-portable Apple-specific pragmas
+            "-Wno-unknown-pragmas".to_owned(),
+            "-Wno-error".to_owned(),
+        ],
+        sdk_root,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn find_ios_simulator_sdk() -> Option<SdkInfo> {
+    None
+}
+
+/// Heuristically decide whether a workspace is an iOS project.
+///
+/// Checks (in order):
+/// 1. `Podfile` contains `platform :ios`
+/// 2. `.podspec` contains `s.platform = :ios` or `s.ios`
+/// 3. Presence of `*.xcodeproj` with iOS-specific SDKROOT keys
+pub fn detect_ios_project(root: &std::path::Path) -> bool {
+    // 1. Podfile
+    let podfile = root.join("Podfile");
+    if let Ok(text) = std::fs::read_to_string(&podfile) {
+        if text.contains("platform :ios") || text.contains("platform :tvos") {
+            return true;
+        }
+    }
+
+    // 2. .podspec in root
+    if let Ok(rd) = std::fs::read_dir(root) {
+        for entry in rd.flatten() {
+            let name = entry.file_name();
+            if name.to_string_lossy().ends_with(".podspec") {
+                if let Ok(text) = std::fs::read_to_string(entry.path()) {
+                    if text.contains(".ios") || text.contains("platform = :ios") {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. .xcodeproj pbxproj SDKROOT hint
+    if let Ok(rd) = std::fs::read_dir(root) {
+        for entry in rd.flatten() {
+            let name = entry.file_name();
+            if name.to_string_lossy().ends_with(".xcodeproj") {
+                let pbx = entry.path().join("project.pbxproj");
+                if let Ok(text) = std::fs::read_to_string(&pbx) {
+                    if text.contains("iphoneos") || text.contains("iphonesimulator") {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Return `-I` flags for CocoaPods public headers.
+///
+/// Looks for `Pods/Headers/Public` relative to `workspace_root`.
+/// This is the standard CocoaPods layout; both regular and xcfilelist-patch
+/// setups expose headers here after `pod install`.
+pub fn cocoapods_flags(workspace_root: &std::path::Path) -> Vec<String> {
+    let mut flags = Vec::new();
+
+    // Standard CocoaPods layout: Pods/Headers/Public/
+    let public_headers = workspace_root.join("Pods").join("Headers").join("Public");
+    if public_headers.exists() {
+        // Add the Public/ root (for `#import <Pod/Header.h>` style).
+        flags.push("-I".to_owned());
+        flags.push(public_headers.to_string_lossy().into_owned());
+        // Also add each pod's subdirectory.
+        if let Ok(rd) = std::fs::read_dir(&public_headers) {
+            for entry in rd.flatten() {
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    flags.push("-I".to_owned());
+                    flags.push(entry.path().to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+
+    // Some setups also use Pods/Headers/Private/
+    let private_headers = workspace_root.join("Pods").join("Headers").join("Private");
+    if private_headers.exists() {
+        flags.push("-I".to_owned());
+        flags.push(private_headers.to_string_lossy().into_owned());
+    }
+
+    // XCFramework / xcfilelist-patch layout: Pods/<PodName>/ directly.
+    // Don't recurse deeply to avoid bloat — just top-level.
+    let pods_dir = workspace_root.join("Pods");
+    if pods_dir.exists() && !public_headers.exists() {
+        if let Ok(rd) = std::fs::read_dir(&pods_dir) {
+            for entry in rd.flatten() {
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    // Skip hidden dirs, Local Podspecs dir, etc.
+                    if name_str.starts_with('.') || name_str == "Headers" {
+                        continue;
+                    }
+                    flags.push("-I".to_owned());
+                    flags.push(entry.path().to_string_lossy().into_owned());
+                }
+            }
+        }
     }
 
     flags

@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{bail, Result};
 use clang_sys::*;
 
+use crate::crash_guard::with_crash_guard;
+
 /// RAII wrapper for a `CXIndex`.
 pub struct ClangIndex {
     pub(crate) cx: CXIndex,
@@ -48,8 +50,8 @@ impl ClangIndex {
         let c_path =
             CString::new(path_str.as_ref()).map_err(|e| anyhow::anyhow!("bad path: {e}"))?;
 
-        // Build argv: ["clang", <extra_args>..., <file>]
-        let mut argv_cstrings: Vec<CString> = extra_args
+        // Build argv: [<extra_args>...]
+        let argv_cstrings: Vec<CString> = extra_args
             .iter()
             .filter_map(|a| CString::new(a.as_str()).ok())
             .collect();
@@ -57,19 +59,29 @@ impl ClangIndex {
         let argv_ptrs: Vec<*const i8> = argv_cstrings.iter().map(|s| s.as_ptr()).collect();
 
         let flags =
-            CXTranslationUnit_DetailedPreprocessingRecord | CXTranslationUnit_SkipFunctionBodies; // faster for indexing
+            CXTranslationUnit_DetailedPreprocessingRecord | CXTranslationUnit_SkipFunctionBodies;
 
-        let tu = unsafe {
-            clang_parseTranslationUnit(
-                self.cx,
-                c_path.as_ptr(),
-                argv_ptrs.as_ptr(),
-                argv_ptrs.len() as i32,
-                std::ptr::null_mut(),
-                0,
-                flags,
-            )
-        };
+        // Clang indexes are not Send but we hold &self across the guard —
+        // the guard runs on the same thread, so this is safe.
+        let cx = self.cx;
+        let c_path_ptr = c_path.as_ptr();
+        let argv_ptr = argv_ptrs.as_ptr();
+        let argc = argv_ptrs.len() as i32;
+
+        let tu = with_crash_guard(|| {
+            let tu = unsafe {
+                clang_parseTranslationUnit(
+                    cx,
+                    c_path_ptr,
+                    argv_ptr,
+                    argc,
+                    std::ptr::null_mut(),
+                    0,
+                    flags,
+                )
+            };
+            Ok(tu)
+        })?;
 
         if tu.is_null() {
             bail!("clang_parseTranslationUnit failed for {:?}", path);

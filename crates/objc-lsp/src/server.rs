@@ -81,7 +81,7 @@ impl Server {
             .and_then(CompileCommandsDb::find_and_load)
             .map(|db| Arc::new(db) as Arc<dyn FlagResolver>);
 
-        let base_flags = sdk::default_include_flags();
+        let base_flags = sdk::workspace_include_flags(workspace_root.as_deref());
 
         tracing::info!("Server::new: creating ClangIndex...");
         let clang_index = Arc::new(ClangIndex::new()?);

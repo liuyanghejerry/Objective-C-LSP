@@ -9,6 +9,7 @@
 //! - Rename (selectors, properties)
 
 pub mod completion;
+pub mod crash_guard;
 pub mod diagnostics;
 pub mod goto_def;
 pub mod hover;
