@@ -52,11 +52,19 @@ impl ClangIndex {
             parts.push(format!("*Type:* `{ty_str}`"));
         }
 
-        // Brief doc comment from clang.
+        // Brief doc comment from clang (covers Doxygen-style brief).
         let comment = unsafe { clang_Cursor_getBriefCommentText(cursor) };
         let comment_str = cx_string_owned(comment);
         if !comment_str.is_empty() {
             parts.push(comment_str);
+        } else {
+            // Fall back to the full raw comment text — this covers Apple
+            // HeaderDoc `/*!` blocks and multi-paragraph doc comments.
+            let raw = cx_string_owned(unsafe { clang_Cursor_getRawCommentText(cursor) });
+            let cleaned = clean_raw_comment(&raw);
+            if !cleaned.is_empty() {
+                parts.push(cleaned);
+            }
         }
 
         if parts.is_empty() {
@@ -106,4 +114,111 @@ fn cx_string_owned(s: CXString) -> String {
     };
     unsafe { clang_disposeString(s) };
     result
+}
+
+/// Strip comment delimiters from a raw Clang comment string and return
+/// clean prose suitable for Markdown hover rendering.
+///
+/// Handles all common Apple/Doxygen doc comment styles:
+/// - `/*!` … `*/`  (Apple HeaderDoc)
+/// - `/**` … `*/`  (Doxygen block)
+/// - `///` / `//!` line comments
+fn clean_raw_comment(raw: &str) -> String {
+    if raw.is_empty() {
+        return String::new();
+    }
+
+    let lines: Vec<&str> = raw.lines().collect();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+
+    for line in &lines {
+        let t = line.trim();
+        // Strip opening markers.
+        let t = t
+            .strip_prefix("/*!")
+            .or_else(|| t.strip_prefix("/**"))
+            .or_else(|| t.strip_prefix("//!"))
+            .or_else(|| t.strip_prefix("///"))
+            .unwrap_or(t);
+        // Strip closing marker.
+        let t = t.trim_end_matches("*/").trim();
+        // Strip leading ` * ` from block comment body lines.
+        let t = t.strip_prefix("* ").unwrap_or(
+            t.strip_prefix('*').unwrap_or(t)
+        );
+        // Convert @param / @return tags to Markdown bold.
+        let line_out = convert_doc_tag(t.trim());
+        if !line_out.is_empty() {
+            out.push(line_out);
+        }
+    }
+
+    out.join("\n")
+}
+
+/// Convert `@param foo desc` / `@return desc` to Markdown-friendly text.
+fn convert_doc_tag(line: &str) -> String {
+    if let Some(rest) = line.strip_prefix("@param ").or_else(|| line.strip_prefix("\\param ")) {
+        let mut parts = rest.splitn(2, ' ');
+        let name = parts.next().unwrap_or("");
+        let desc = parts.next().unwrap_or("").trim();
+        if desc.is_empty() {
+            return format!("**Parameter** `{name}`");
+        }
+        return format!("**Parameter** `{name}`: {desc}");
+    }
+    if let Some(rest) = line.strip_prefix("@return ").or_else(|| line.strip_prefix("\\return ")) {
+        return format!("**Returns**: {}", rest.trim());
+    }
+    if let Some(rest) = line.strip_prefix("@abstract ") {
+        return rest.trim().to_owned();
+    }
+    if let Some(rest) = line.strip_prefix("@discussion ") {
+        return rest.trim().to_owned();
+    }
+    line.to_owned()
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleans_apple_headerdoc_block() {
+        let raw = "/*!\n * @abstract Returns the name.\n * @param index The index.\n * @return The name string.\n */";
+        let result = clean_raw_comment(raw);
+        assert!(result.contains("Returns the name"), "got: {result}");
+        assert!(result.contains("Parameter"), "got: {result}");
+        assert!(result.contains("**Returns**"), "got: {result}");
+    }
+
+    #[test]
+    fn cleans_triple_slash_comments() {
+        let raw = "/// First line.\n/// Second line.";
+        let result = clean_raw_comment(raw);
+        assert!(result.contains("First line"), "got: {result}");
+        assert!(result.contains("Second line"), "got: {result}");
+    }
+
+    #[test]
+    fn empty_raw_returns_empty() {
+        assert_eq!(clean_raw_comment(""), "");
+    }
+
+    #[test]
+    fn converts_param_tag() {
+        let result = convert_doc_tag("@param name The name of the object.");
+        assert!(result.contains("**Parameter**"), "got: {result}");
+        assert!(result.contains("`name`"), "got: {result}");
+    }
+
+    #[test]
+    fn converts_return_tag() {
+        let result = convert_doc_tag("@return The resulting value.");
+        assert!(result.contains("**Returns**"), "got: {result}");
+    }
 }
