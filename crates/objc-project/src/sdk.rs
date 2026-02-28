@@ -133,7 +133,11 @@ fn build_gnustep_flags(root: &std::path::Path) -> Option<Vec<String>> {
         flags.push(runtime_headers.to_string_lossy().into_owned());
     }
 
-    if flags.is_empty() { None } else { Some(flags) }
+    if flags.is_empty() {
+        None
+    } else {
+        Some(flags)
+    }
 }
 
 /// Best-effort list of include flags for the current environment (macOS default).
@@ -332,6 +336,12 @@ pub fn detect_ios_project(root: &std::path::Path) -> bool {
 /// Looks for `Pods/Headers/Public` relative to `workspace_root`.
 /// This is the standard CocoaPods layout; both regular and xcfilelist-patch
 /// setups expose headers here after `pod install`.
+///
+/// When `Pods/` does not exist (i.e. `pod install` has never been run),
+/// falls back to scanning the workspace source tree for directories that
+/// contain `.h` files and adding their *parent* as an `-I` path.  This
+/// makes framework-style imports like `#import <PodName/Header.h>` resolve
+/// against the project's own source tree.
 pub fn cocoapods_flags(workspace_root: &std::path::Path) -> Vec<String> {
     let mut flags = Vec::new();
 
@@ -379,7 +389,132 @@ pub fn cocoapods_flags(workspace_root: &std::path::Path) -> Vec<String> {
         }
     }
 
+    // ── Fallback: no Pods/ directory (pod install not yet run) ──────────────
+    // Synthesise a CocoaPods-style flat header directory so that framework-
+    // style imports like `#import <PodName/Header.h>` resolve from the
+    // project's own source tree without requiring pod install.
+    if !pods_dir.exists() {
+        if let Some(synth_dir) = synthetic_pod_headers_dir(workspace_root) {
+            // synth_dir/  ←  add this as -I so <PodName/Foo.h> resolves
+            flags.push("-I".to_owned());
+            flags.push(synth_dir.to_string_lossy().into_owned());
+        }
+    }
+
     flags
+}
+
+/// Create (or reuse) a synthetic flat-headers directory that mirrors what
+/// `pod install` would create in `Pods/Headers/Public/`.
+///
+/// Scans the workspace source tree for `.h` files, groups them by the
+/// top-level subdirectory of `workspace_root` they belong to (treated as the
+/// pod name), then creates symlinks in a temp directory:
+///
+/// ```text
+/// /tmp/objc-lsp-headers/<hash>/
+///   SAKIdentityCardRecognizer/   ←  all *.h under SAKIdentityCardRecognizer/**
+///     SPKNfcIdentifyCommand.h   ←  symlink → actual path
+/// ```
+///
+/// Returns `None` on any I/O error.  The temp directory is reused across
+/// calls for the same workspace (identified by a hash of the path).
+fn synthetic_pod_headers_dir(workspace_root: &std::path::Path) -> Option<PathBuf> {
+    use std::collections::HashMap;
+
+    // Stable hash of workspace_root so the same project reuses the same dir.
+    let hash = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        workspace_root.hash(&mut h);
+        h.finish()
+    };
+    let synth_root = std::env::temp_dir()
+        .join("objc-lsp-headers")
+        .join(format!("{hash:x}"));
+
+    // Collect all .h files grouped by their first path component
+    // relative to workspace_root (= the pod name).
+    let mut pod_headers: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    collect_headers_for_synth(workspace_root, workspace_root, 0, 6, &mut pod_headers);
+
+    if pod_headers.is_empty() {
+        return None;
+    }
+
+    // Create the synthetic directory structure and symlinks.
+    for (pod_name, headers) in &pod_headers {
+        let pod_dir = synth_root.join(pod_name);
+        if std::fs::create_dir_all(&pod_dir).is_err() {
+            continue;
+        }
+        for header_path in headers {
+            let file_name = match header_path.file_name() {
+                Some(n) => n,
+                None => continue,
+            };
+            let link_path = pod_dir.join(file_name);
+            // Skip if already exists (idempotent).
+            if link_path.exists() || link_path.symlink_metadata().is_ok() {
+                continue;
+            }
+            #[cfg(unix)]
+            let _ = std::os::unix::fs::symlink(header_path, &link_path);
+            #[cfg(not(unix))]
+            let _ = std::fs::copy(header_path, &link_path);
+        }
+    }
+
+    Some(synth_root)
+}
+
+/// Recursively collect all `.h` files under `dir`, grouped by the first path
+/// component of each file relative to `workspace_root` (= the pod name).
+fn collect_headers_for_synth(
+    workspace_root: &std::path::Path,
+    dir: &std::path::Path,
+    depth: usize,
+    max_depth: usize,
+    out: &mut std::collections::HashMap<String, Vec<PathBuf>>,
+) {
+    if depth > max_depth {
+        return;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let ft = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        if ft.is_file() && name_str.ends_with(".h") {
+            // Determine the pod name = first component of the relative path.
+            if let Ok(rel) = path.strip_prefix(workspace_root) {
+                if let Some(pod) = rel.components().next() {
+                    let pod_name = pod.as_os_str().to_string_lossy().into_owned();
+                    out.entry(pod_name).or_default().push(path.clone());
+                }
+            }
+        } else if ft.is_dir() {
+            if name_str.starts_with('.')
+                || name_str == "build"
+                || name_str == "DerivedData"
+                || name_str == "Pods"
+                || name_str == "node_modules"
+                || name_str == "vendor"
+            {
+                continue;
+            }
+            collect_headers_for_synth(workspace_root, &path, depth + 1, max_depth, out);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -418,4 +553,47 @@ mod tests {
         // flags may be empty — that's fine
         let _ = flags;
     }
+
+    #[test]
+    fn synthetic_pod_headers_finds_header_files() {
+        // Create a fake project tree:
+        //   tmp/
+        //     MyPod/
+        //       Classes/
+        //         Foo.h      ← header here
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let classes = tmp.path().join("MyPod").join("Classes");
+        std::fs::create_dir_all(&classes).unwrap();
+        std::fs::write(classes.join("Foo.h"), "// header").unwrap();
+
+        let synth = synthetic_pod_headers_dir(tmp.path())
+            .expect("expected synthetic dir");
+        // synth/MyPod/Foo.h should exist (symlink or copy)
+        assert!(
+            synth.join("MyPod").join("Foo.h").exists(),
+            "expected synth/MyPod/Foo.h to exist: {synth:?}"
+        );
+    }
+
+    #[test]
+    fn cocoapods_flags_fallback_when_no_pods_dir() {
+        // Create a fake project: tmp/MyPod/Classes/Foo.h (no Pods/ dir)
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let classes = tmp.path().join("MyPod").join("Classes");
+        std::fs::create_dir_all(&classes).unwrap();
+        std::fs::write(classes.join("Foo.h"), "// header").unwrap();
+
+        let flags = cocoapods_flags(tmp.path());
+        // The fallback should produce at least one -I flag pointing into a
+        // synthetic temp directory that contains a MyPod/ subdirectory.
+        let has_synth = flags.windows(2).any(|w| {
+            w[0] == "-I"
+                && std::path::Path::new(&w[1]).join("MyPod").join("Foo.h").exists()
+        });
+        assert!(
+            has_synth,
+            "expected fallback -I <synth-dir> with MyPod/Foo.h when no Pods dir: {flags:?}"
+        );
+    }
 }
+

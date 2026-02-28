@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（crash 隔离 + iOS SDK 检测 + CocoaPods 头文件发现；commit `69cf39c`）
+> 最后更新：2026-02-28（合成 Pod 头文件目录，解决无 `pod install` 时框架式 import 报错；commit 待提交）
 
 ---
 
@@ -77,10 +77,10 @@
 | `objc-intelligence` | **43** | ✅ 全部通过 | selector, property, protocol, category, header_nav, code_actions, nullability |
 | `objc-semantic` | **5** | ✅ 全部通过 | hover (Apple SDK doc comment tests) |
 | `objc-lsp` | 0 | ✅ 二进制启动正常 | 尚无测试用例 |
-| `objc-project` | **8** | ✅ 全部通过 | shell_words_split (compile_db) |
+| `objc-project` | **13** | ✅ 全部通过 | sdk flags, synthetic pod headers, cocoapods fallback |
 | `objc-store` | **12** | ✅ 全部通过 | upsert_file, find_symbols_by_name, search_symbols |
 
-> `cargo test --workspace` 全部通过（**111 tests**，零 failure）。libclang 路径通过 `.cargo/config.toml` 固化，无需手动设置环境变量。
+> `cargo test --workspace` 全部通过（**113 tests**，零 failure）。libclang 路径通过 `.cargo/config.toml` 固化，无需手动设置环境变量。
 ---
 
 ## 目录结构（实际 vs 规划）
@@ -157,9 +157,11 @@ crates/
 | F2 | 崩溃隔离：`crash_guard` 模块（`sigsetjmp/siglongjmp` 保护 `clang_parseTranslationUnit`） | ✅ 完成 (`69cf39c`) |
 | F3 | iOS SDK 检测：读取 Podfile/podspec/pbxproj，自动切换 iPhoneSimulator SDK | ✅ 完成 (`69cf39c`) |
 | F4 | CocoaPods 头文件路径发现：自动添加 `Pods/Headers/Public/` 子目录 `-I` flags | ✅ 完成 (`69cf39c`) |
+| F5 | 合成 Pod 头文件目录：无 `Pods/` 时扫描源树创建平铺 symlink 目录，解决 `#import <PodName/Header.h>` 报红 | ✅ 完成 (本次提交) |
 
 ### 修复详情
 
 - **根本原因**：`@@HOMEBREW_PREFIX@@` 是 Homebrew LLVM 的 dylib 安装名，`LC_RPATH` 不足以让 dyld 找到它，必须显式设置 `DYLD_LIBRARY_PATH`。
 - **iOS SIGSEGV 根因**：项目目标是 iOS，但 `default_include_flags()` 使用 macOS SDK；`CoreNFC` 等框架不存在于 macOS SDK，导致 libclang 在 `clang_parseTranslationUnit` 中 SIGSEGV。
 - **修复策略**：双保险 — 先检测 iOS 项目并切换 SDK（根治），再用 `sigsetjmp/siglongjmp` guard 防止任何残余崩溃杀死进程。
+- **框架式 import 根因（F5）**：`#import <SAKIdentityCardRecognizer/SPKNfcIdentifyCommand.h>` 需要 CocoaPods 平铺目录结构（`PodName/Foo.h`），但 `pod install` 未运行时 `Pods/` 不存在。无法用单个 `-I parent/` 解决，因为头文件实际路径有多层嵌套。**修复**：在 `/tmp/objc-lsp-headers/<hash>/` 下建立 symlink 镜像（`PodName/Foo.h → 实际路径`），并将该目录作为 `-I` 传入 libclang。外部 Pod 仍会报 "file not found"（正确行为，需 `pod install`）。
