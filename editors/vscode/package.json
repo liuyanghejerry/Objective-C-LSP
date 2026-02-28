@@ -90,6 +90,16 @@
           "type": "boolean",
           "default": false,
           "description": "Run clang --analyze on save (slower; recommended only on explicit trigger)."
+        },
+        "objc-lsp.enableCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Code Lens annotations (reference counts, protocol conformance) above methods."
+        },
+        "objc-lsp.enableDecorators": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline decorators for retain cycles, strong delegates, and magic numbers."
         }
       }
     },

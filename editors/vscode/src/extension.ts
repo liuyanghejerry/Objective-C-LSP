@@ -4,6 +4,8 @@ import {
 } from "vscode-languageserver-protocol";
 import { startClient, stopClient, getClient, createStatusBar } from "./server";
 import { registerCommands } from "./commands";
+import { registerCodeLens } from "./codelens";
+import { registerDecorators } from "./decorators";
 
 export async function activate(
   context: vscode.ExtensionContext
@@ -84,6 +86,12 @@ export async function activate(
 
   // ── Quick Fix commands ───────────────────────────────────────────────────
   registerCommands(context);
+
+  // ── Code Lens ──────────────────────────────────────────────────────────────
+  registerCodeLens(context);
+
+  // ── Decorators ─────────────────────────────────────────────────────────────
+  registerDecorators(context);
   // ── Restart on server-path change ─────────────────────────────────────────
 
   context.subscriptions.push(
