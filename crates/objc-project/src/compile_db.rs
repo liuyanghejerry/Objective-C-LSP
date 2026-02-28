@@ -103,3 +103,58 @@ fn shell_words_split(s: &str) -> Vec<String> {
     }
     words
 }
+
+#[cfg(test)]
+mod tests {
+    use super::shell_words_split;
+
+    #[test]
+    fn split_simple_words() {
+        assert_eq!(shell_words_split("clang -o foo bar.m"), ["clang", "-o", "foo", "bar.m"]);
+    }
+
+    #[test]
+    fn split_single_word() {
+        assert_eq!(shell_words_split("clang"), ["clang"]);
+    }
+
+    #[test]
+    fn split_empty_string() {
+        let v: Vec<String> = shell_words_split("");
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn double_quotes_protect_spaces() {
+        assert_eq!(
+            shell_words_split(r#"clang "-DFOO=hello world" -O2"#),
+            ["clang", "-DFOO=hello world", "-O2"]
+        );
+    }
+
+    #[test]
+    fn single_quotes_protect_spaces() {
+        assert_eq!(
+            shell_words_split("cc '-DFOO=hello world' -O0"),
+            ["cc", "-DFOO=hello world", "-O0"]
+        );
+    }
+
+    #[test]
+    fn mixed_quoted_and_plain() {
+        assert_eq!(
+            shell_words_split(r#"a "b c" d 'e f' g"#),
+            ["a", "b c", "d", "e f", "g"]
+        );
+    }
+
+    #[test]
+    fn multiple_spaces_between_words() {
+        assert_eq!(shell_words_split("a  b   c"), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn tabs_between_words() {
+        assert_eq!(shell_words_split("a\tb\tc"), ["a", "b", "c"]);
+    }
+}

@@ -82,3 +82,128 @@ impl IndexStore {
         Ok(self.conn.last_insert_rowid())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::IndexStore;
+
+    fn store() -> IndexStore {
+        IndexStore::in_memory().unwrap()
+    }
+
+    /// Insert a symbol row directly for test setup.
+    fn insert_symbol(store: &IndexStore, file_id: i64, name: &str, kind: &str, selector: Option<&str>, line: u32, col: u32) {
+        store.conn.execute(
+            "INSERT INTO symbols(file_id,name,kind,selector,line,col,end_line,end_col) VALUES(?1,?2,?3,?4,?5,?6,?5,?6)",
+            rusqlite::params![file_id, name, kind, selector, line, col],
+        ).unwrap();
+    }
+
+    // -------------------------------------------------------------------
+    // upsert_file
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn upsert_file_returns_rowid() {
+        let s = store();
+        let id = s.upsert_file("/tmp/Foo.m", 1000).unwrap();
+        assert!(id > 0);
+    }
+
+    #[test]
+    fn upsert_file_updates_mtime_on_conflict() {
+        let s = store();
+        s.upsert_file("/tmp/Foo.m", 1000).unwrap();
+        // Upsert again with a new mtime — should not fail.
+        let id2 = s.upsert_file("/tmp/Foo.m", 2000);
+        assert!(id2.is_ok(), "second upsert failed: {id2:?}");
+    }
+
+    // -------------------------------------------------------------------
+    // find_symbols_by_name
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn find_symbols_empty_store() {
+        let s = store();
+        let results = s.find_symbols_by_name("Foo").unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn find_symbols_exact_match() {
+        let s = store();
+        let fid = s.upsert_file("/src/Foo.m", 0).unwrap();
+        insert_symbol(&s, fid, "MyClass", "class", None, 1, 0);
+        let results = s.find_symbols_by_name("MyClass").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "MyClass");
+        assert_eq!(results[0].kind, "class");
+        assert_eq!(results[0].file_path, "/src/Foo.m");
+    }
+
+    #[test]
+    fn find_symbols_no_partial_match() {
+        let s = store();
+        let fid = s.upsert_file("/src/Foo.m", 0).unwrap();
+        insert_symbol(&s, fid, "MyClass", "class", None, 1, 0);
+        // Partial name should NOT match (exact query).
+        let results = s.find_symbols_by_name("My").unwrap();
+        assert!(results.is_empty(), "expected no results for partial name, got {results:?}");
+    }
+
+    #[test]
+    fn find_symbols_multiple_files() {
+        let s = store();
+        let fid1 = s.upsert_file("/a.m", 0).unwrap();
+        let fid2 = s.upsert_file("/b.m", 0).unwrap();
+        insert_symbol(&s, fid1, "Duplicate", "class", None, 1, 0);
+        insert_symbol(&s, fid2, "Duplicate", "class", None, 1, 0);
+        let results = s.find_symbols_by_name("Duplicate").unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn find_symbols_with_selector() {
+        let s = store();
+        let fid = s.upsert_file("/src/Foo.m", 0).unwrap();
+        insert_symbol(&s, fid, "initWithName:age:", "method", Some("initWithName:age:"), 5, 0);
+        let results = s.find_symbols_by_name("initWithName:age:").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].selector.as_deref(), Some("initWithName:age:"));
+    }
+
+    // -------------------------------------------------------------------
+    // search_symbols (prefix / LIKE)
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn search_symbols_prefix_match() {
+        let s = store();
+        let fid = s.upsert_file("/src/Foo.m", 0).unwrap();
+        insert_symbol(&s, fid, "NSString", "class", None, 1, 0);
+        insert_symbol(&s, fid, "NSArray", "class", None, 2, 0);
+        insert_symbol(&s, fid, "UIView", "class", None, 3, 0);
+        let results = s.search_symbols("NS").unwrap();
+        assert_eq!(results.len(), 2, "expected 2 NS* results, got {results:?}");
+    }
+
+    #[test]
+    fn search_symbols_no_match() {
+        let s = store();
+        let fid = s.upsert_file("/src/Foo.m", 0).unwrap();
+        insert_symbol(&s, fid, "Foo", "class", None, 1, 0);
+        let results = s.search_symbols("Bar").unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn search_symbols_empty_query_matches_all() {
+        let s = store();
+        let fid = s.upsert_file("/src/Foo.m", 0).unwrap();
+        insert_symbol(&s, fid, "Alpha", "class", None, 1, 0);
+        insert_symbol(&s, fid, "Beta", "class", None, 2, 0);
+        let results = s.search_symbols("").unwrap();
+        assert_eq!(results.len(), 2);
+    }
+}
