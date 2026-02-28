@@ -49,3 +49,65 @@ impl CategoryRegistry {
         self.map.keys().map(String::as_str)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_info(base_class: &str, category_name: &str) -> CategoryInfo {
+        CategoryInfo {
+            base_class: base_class.to_owned(),
+            category_name: category_name.to_owned(),
+            file: format!("{base_class}+{category_name}.h"),
+            line: 1,
+        }
+    }
+
+    #[test]
+    fn new_registry_is_empty() {
+        let reg = CategoryRegistry::new();
+        assert!(reg.categories_for("Foo").is_empty());
+        assert_eq!(reg.all_base_classes().count(), 0);
+    }
+
+    #[test]
+    fn register_and_retrieve_single_category() {
+        let mut reg = CategoryRegistry::new();
+        reg.register(make_info("NSString", "Extras"));
+        let cats = reg.categories_for("NSString");
+        assert_eq!(cats.len(), 1);
+        assert_eq!(cats[0].category_name, "Extras");
+    }
+
+    #[test]
+    fn register_multiple_categories_for_same_base() {
+        let mut reg = CategoryRegistry::new();
+        reg.register(make_info("UIView", "Animations"));
+        reg.register(make_info("UIView", "Layout"));
+        reg.register(make_info("UIView", "Shadows"));
+        let cats = reg.categories_for("UIView");
+        assert_eq!(cats.len(), 3);
+        let names: Vec<&str> = cats.iter().map(|c| c.category_name.as_str()).collect();
+        assert!(names.contains(&"Animations"), "{names:?}");
+        assert!(names.contains(&"Layout"), "{names:?}");
+        assert!(names.contains(&"Shadows"), "{names:?}");
+    }
+
+    #[test]
+    fn categories_for_unknown_class_returns_empty() {
+        let mut reg = CategoryRegistry::new();
+        reg.register(make_info("Foo", "Bar"));
+        assert!(reg.categories_for("NotFoo").is_empty());
+    }
+
+    #[test]
+    fn all_base_classes_enumerates_all() {
+        let mut reg = CategoryRegistry::new();
+        reg.register(make_info("Alpha", "A"));
+        reg.register(make_info("Beta", "B"));
+        reg.register(make_info("Alpha", "C")); // second category for Alpha
+        let mut bases: Vec<&str> = reg.all_base_classes().collect();
+        bases.sort();
+        assert_eq!(bases, ["Alpha", "Beta"]);
+    }
+}
