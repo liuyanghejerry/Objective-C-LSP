@@ -13,18 +13,21 @@ use lsp_types::notification::{
 use lsp_types::request::{
     CodeActionRequest, Completion, DocumentSymbolRequest, GotoDeclaration, GotoDefinition,
     GotoImplementation, HoverRequest, InlayHintRequest, References, Rename,
-    Request as _, SemanticTokensFullRequest,
+    Request as _, SemanticTokensFullRequest, WorkspaceSymbolRequest,
 };
 use lsp_types::{
-    CodeActionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    CodeAction, CodeActionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, GotoDefinitionParams, HoverParams, InitializeParams,
-    InitializeResult, InlayHintParams, PublishDiagnosticsParams, ReferenceParams,
-    RenameParams, SemanticTokensParams, ServerInfo, Uri,
+    InitializeResult, InlayHintParams, Location, PublishDiagnosticsParams, ReferenceParams,
+    RenameParams, SemanticTokensParams, ServerInfo, SymbolInformation, SymbolKind, Uri,
+    WorkspaceSymbolParams,
 };
 
 use objc_project::{compile_db::CompileCommandsDb, sdk, FlagResolver};
 use objc_semantic::ClangIndex;
-use objc_syntax::{inlay_hints::inlay_hints, symbols::document_symbols, tokens::semantic_tokens_full, ObjcParser};
+use objc_store::{IndexStore, SymbolInput};
+use objc_syntax::{flat_symbols, inlay_hints::inlay_hints, symbols::document_symbols, tokens::semantic_tokens_full, ObjcParser};
+use objc_intelligence::code_actions::{syntax_code_actions, CodeActionContext};
 
 use crate::capabilities::server_capabilities;
 
@@ -45,6 +48,8 @@ pub struct Server {
     flag_resolver: Option<Arc<dyn FlagResolver>>,
     /// Default SDK / GNUstep include flags (always prepended).
     base_flags: Vec<String>,
+    /// Workspace-wide symbol index.
+    store: Arc<IndexStore>,
 }
 
 impl Server {
@@ -59,6 +64,8 @@ impl Server {
 
         let clang_index = Arc::new(ClangIndex::new()?);
 
+        let store = Arc::new(IndexStore::in_memory()?);
+
         Ok(Self {
             connection,
             documents: HashMap::new(),
@@ -66,9 +73,9 @@ impl Server {
             clang_index,
             flag_resolver,
             base_flags,
+            store,
         })
     }
-
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
@@ -111,6 +118,7 @@ impl Server {
             InlayHintRequest::METHOD => self.on_inlay_hint(req)?,
             Rename::METHOD => self.on_rename(req)?,
             CodeActionRequest::METHOD => self.on_code_action(req)?,
+            WorkspaceSymbolRequest::METHOD => self.on_workspace_symbol(req)?,
             _ => {
                 // Unknown request: send empty response to avoid client timeout.
                 let resp = Response::new_ok(req.id, serde_json::Value::Null);
@@ -145,6 +153,7 @@ impl Server {
                 content: content.clone(),
             },
         );
+        self.index_content(&uri, &content);
         self.publish_diagnostics(&uri, &content)?;
         Ok(())
     }
@@ -158,6 +167,7 @@ impl Server {
             if let Some(doc) = self.documents.get_mut(&uri) {
                 doc.content = content.clone();
             }
+            self.index_content(&uri, &content);
             self.publish_diagnostics(&uri, &content)?;
         }
         Ok(())
@@ -171,6 +181,45 @@ impl Server {
             self.clang_index.dispose_file(&path);
         }
         Ok(())
+    }
+
+    /// Index the symbols in `content` into the workspace store.
+    fn index_content(&self, uri: &Uri, content: &str) {
+        let path_str = match Self::uri_to_path(uri) {
+            Some(p) => p.to_string_lossy().into_owned(),
+            None => return,
+        };
+        let mut parser = self.parser.lock().unwrap();
+        let parsed = match parser.parse(content) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::debug!("index_content: parse failed for {path_str}: {e}");
+                return;
+            }
+        };
+        drop(parser);
+        let flat = match flat_symbols(&parsed) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::debug!("index_content: flat_symbols failed: {e}");
+                return;
+            }
+        };
+        let inputs: Vec<SymbolInput> = flat
+            .into_iter()
+            .map(|s| SymbolInput {
+                name: s.name,
+                kind: s.kind_str,
+                selector: s.selector,
+                line: s.line,
+                col: s.col,
+                end_line: s.end_line,
+                end_col: s.end_col,
+            })
+            .collect();
+        if let Err(e) = self.store.index_file_symbols(&path_str, 0, &inputs) {
+            tracing::warn!("index_content: store error: {e}");
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -447,23 +496,83 @@ impl Server {
         let uri = &params.text_document.uri;
         let range = params.range;
 
-        let result = if let Some(path) = Self::uri_to_path(uri) {
+        let mut all_actions: Vec<CodeAction> = Vec::new();
+
+        // 1. libclang-based actions (protocol stubs, etc.)
+        if let Some(path) = Self::uri_to_path(uri) {
             match self.clang_index.code_actions_at(&path, range, uri) {
-                Ok(actions) if !actions.is_empty() => serde_json::to_value(actions)?,
-                Ok(_) => serde_json::Value::Array(vec![]),
-                Err(e) => {
-                    tracing::warn!("code action error: {e}");
-                    serde_json::Value::Array(vec![])
-                }
+                Ok(actions) => all_actions.extend(actions),
+                Err(e) => tracing::warn!("code action (semantic) error: {e}"),
             }
-        } else {
+        }
+
+        // 2. Tree-sitter–based actions (interface stub, NS_ASSUME_NONNULL).
+        if let Some(doc) = self.documents.get(uri) {
+            let ext = uri.as_str()
+                .rsplit('.')
+                .next()
+                .unwrap_or("");
+            let ctx = CodeActionContext {
+                uri,
+                source: &doc.content.clone(),
+                extension: ext,
+            };
+            match syntax_code_actions(&ctx) {
+                Ok(actions) => all_actions.extend(actions),
+                Err(e) => tracing::warn!("code action (syntax) error: {e}"),
+            }
+        }
+
+        let result = if all_actions.is_empty() {
             serde_json::Value::Array(vec![])
+        } else {
+            serde_json::to_value(all_actions)?
         };
 
         let resp = Response::new_ok(id, result);
         self.connection.sender.send(Message::Response(resp))?;
         Ok(())
     }
+    fn on_workspace_symbol(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, WorkspaceSymbolParams) =
+            req.extract(WorkspaceSymbolRequest::METHOD)?;
+        let query = &params.query;
+
+        let records = match self.store.search_symbols(query) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("workspace/symbol error: {e}");
+                vec![]
+            }
+        };
+
+        #[allow(deprecated)]
+        let symbols: Vec<SymbolInformation> = records
+            .into_iter()
+            .filter_map(|rec| {
+                let uri = format!("file://{}", rec.file_path).parse().ok()?;
+                let range = lsp_types::Range {
+                    start: lsp_types::Position { line: rec.line, character: rec.col },
+                    end:   lsp_types::Position { line: rec.line, character: rec.col },
+                };
+                let kind = kind_str_to_symbol_kind(&rec.kind);
+                Some(SymbolInformation {
+                    name: rec.name,
+                    kind,
+                    tags: None,
+                    deprecated: None,
+                    location: Location { uri, range },
+                    container_name: None,
+                })
+            })
+            .collect();
+
+        let result = serde_json::to_value(symbols)?;
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
 
     // -----------------------------------------------------------------------
     // Diagnostics
@@ -500,6 +609,21 @@ impl Server {
         let notif = Notification::new(PublishDiagnostics::METHOD.to_owned(), params);
         self.connection.sender.send(Message::Notification(notif))?;
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn kind_str_to_symbol_kind(kind: &str) -> SymbolKind {
+    match kind {
+        "class"    => SymbolKind::CLASS,
+        "method"   => SymbolKind::METHOD,
+        "property" => SymbolKind::PROPERTY,
+        "protocol" => SymbolKind::INTERFACE,
+        "category" => SymbolKind::MODULE,
+        _          => SymbolKind::VARIABLE,
     }
 }
 

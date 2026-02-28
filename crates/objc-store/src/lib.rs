@@ -7,6 +7,8 @@
 pub mod queries;
 pub mod schema;
 
+pub use queries::{SymbolInput, SymbolRecord};
+
 use rusqlite::Connection;
 use std::path::Path;
 use anyhow::Result;

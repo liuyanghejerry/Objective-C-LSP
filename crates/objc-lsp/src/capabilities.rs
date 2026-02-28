@@ -81,6 +81,9 @@ pub fn server_capabilities() -> ServerCapabilities {
             work_done_progress_options: WorkDoneProgressOptions::default(),
         })),
 
+        // Workspace symbol search.
+        workspace_symbol_provider: Some(OneOf::Left(true)),
+
         // More capabilities will be added as features are implemented.
         ..Default::default()
     }

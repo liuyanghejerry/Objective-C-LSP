@@ -83,6 +83,44 @@ impl IndexStore {
     }
 }
 
+/// A symbol to be inserted/updated in the store (used by `index_file_symbols`).
+#[derive(Debug, Clone)]
+pub struct SymbolInput {
+    pub name: String,
+    pub kind: String,
+    pub selector: Option<String>,
+    pub line: u32,
+    pub col: u32,
+    pub end_line: u32,
+    pub end_col: u32,
+}
+
+impl IndexStore {
+    /// Replace all symbols for `file_path` with `symbols`.
+    ///
+    /// If the file is not yet in the `files` table it is inserted first.
+    /// All old symbols for this file are deleted (CASCADE handles xrefs),
+    /// then the new batch is inserted in a single transaction.
+    pub fn index_file_symbols(&self, file_path: &str, mtime: i64, symbols: &[SymbolInput]) -> Result<()> {
+        let file_id = self.upsert_file(file_path, mtime)?;
+
+        // Delete stale symbols for this file.
+        self.conn.execute(
+            "DELETE FROM symbols WHERE file_id = ?1",
+            rusqlite::params![file_id],
+        )?;
+
+        // Insert new symbols.
+        for sym in symbols {
+            self.conn.execute(
+                "INSERT INTO symbols(file_id,name,kind,selector,line,col,end_line,end_col) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+                rusqlite::params![file_id, sym.name, sym.kind, sym.selector, sym.line, sym.col, sym.end_line, sym.end_col],
+            )?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::IndexStore;

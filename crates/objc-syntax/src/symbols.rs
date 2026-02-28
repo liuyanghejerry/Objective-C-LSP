@@ -22,6 +22,62 @@ pub fn document_symbols(file: &ParsedFile) -> Result<Vec<DocumentSymbol>> {
     aggregate_categories(&mut symbols);
     Ok(symbols)
 }
+/// A flat symbol record suitable for indexing into the store.
+#[derive(Debug, Clone)]
+pub struct FlatSymbol {
+    pub name: String,
+    pub kind_str: String,  // 'class' | 'method' | 'property' | 'protocol'
+    pub selector: Option<String>,
+    pub line: u32,
+    pub col: u32,
+    pub end_line: u32,
+    pub end_col: u32,
+}
+
+/// Extract all symbols from the parsed file as a flat list (depth-first, no nesting).
+///
+/// This is used by the workspace indexer to populate the SQLite store.
+pub fn flat_symbols(file: &ParsedFile) -> Result<Vec<FlatSymbol>> {
+    let syms = document_symbols(file)?;
+    let mut out = Vec::new();
+    flatten_doc_syms(&syms, &mut out);
+    Ok(out)
+}
+
+fn flatten_doc_syms(syms: &[DocumentSymbol], out: &mut Vec<FlatSymbol>) {
+    for sym in syms {
+        let kind_str = symbol_kind_to_str(sym.kind);
+        let selector = if sym.kind == SymbolKind::METHOD {
+            Some(sym.name.clone())
+        } else {
+            None
+        };
+        out.push(FlatSymbol {
+            name: sym.name.clone(),
+            kind_str,
+            selector,
+            line: sym.range.start.line,
+            col: sym.range.start.character,
+            end_line: sym.range.end.line,
+            end_col: sym.range.end.character,
+        });
+        if let Some(children) = &sym.children {
+            flatten_doc_syms(children, out);
+        }
+    }
+}
+
+fn symbol_kind_to_str(kind: SymbolKind) -> String {
+    match kind {
+        SymbolKind::CLASS     => "class",
+        SymbolKind::METHOD    => "method",
+        SymbolKind::PROPERTY  => "property",
+        SymbolKind::INTERFACE => "protocol",
+        SymbolKind::MODULE    => "category",
+        _                     => "other",
+    }.to_owned()
+}
+
 
 // ---------------------------------------------------------------------------
 // Category aggregation

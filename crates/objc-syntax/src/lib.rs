@@ -13,3 +13,4 @@ pub mod tokens;
 pub mod inlay_hints;
 
 pub use parser::ObjcParser;
+pub use symbols::{flat_symbols, FlatSymbol};
