@@ -63,3 +63,4 @@ impl Default for ObjcParser {
         Self::new().expect("ObjC grammar must be available")
     }
 }
+

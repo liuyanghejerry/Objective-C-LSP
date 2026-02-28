@@ -1,10 +1,11 @@
 //! LSP capability advertisement.
 
 use lsp_types::{
-    CompletionOptions, DocumentSymbolOptions, HoverProviderCapability, OneOf, ServerCapabilities,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    WorkDoneProgressOptions,
+    CompletionOptions, DocumentSymbolOptions, HoverProviderCapability, OneOf,
+    SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, WorkDoneProgressOptions,
 };
+use objc_syntax::tokens::semantic_tokens_options;
 
 /// Build the capability set we advertise to the client during `initialize`.
 pub fn server_capabilities() -> ServerCapabilities {
@@ -48,6 +49,11 @@ pub fn server_capabilities() -> ServerCapabilities {
 
         // References.
         references_provider: Some(OneOf::Left(true)),
+
+        // Semantic tokens (syntax highlighting).
+        semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+            semantic_tokens_options(),
+        )),
 
         // More capabilities will be added as features are implemented.
         ..Default::default()
