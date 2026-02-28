@@ -82,6 +82,7 @@ impl Server {
             .map(|db| Arc::new(db) as Arc<dyn FlagResolver>);
 
         let base_flags = sdk::workspace_include_flags(workspace_root.as_deref());
+        tracing::info!("Server::new: base_flags = {:?}", base_flags);
 
         tracing::info!("Server::new: creating ClangIndex...");
         let clang_index = Arc::new(ClangIndex::new()?);
@@ -91,10 +92,15 @@ impl Server {
         let store = Arc::new(IndexStore::in_memory()?);
         tracing::info!("Server::new: IndexStore created");
 
+        tracing::info!("Server::new: creating ObjcParser...");
+        let parser = Arc::new(Mutex::new(ObjcParser::new()?));
+        tracing::info!("Server::new: ObjcParser created");
+        tracing::info!("Server::new: Server ready");
+
         Ok(Self {
             connection,
             documents: HashMap::new(),
-            parser: Arc::new(Mutex::new(ObjcParser::new()?)),
+            parser,
             clang_index,
             flag_resolver,
             base_flags,
@@ -610,6 +616,7 @@ impl Server {
     fn publish_diagnostics(&self, uri: &Uri, content: &str) -> Result<()> {
         let diagnostics = if let Some(path) = Self::uri_to_path(uri) {
             let flags = self.flags_for(&path);
+            tracing::info!("publish_diagnostics: parsing {:?} with {} flags", path, flags.len());
             match self.clang_index.parse_file(&path, &flags) {
                 Ok(()) => {
                     let mut diags = match self.clang_index.diagnostics_for(&path) {
