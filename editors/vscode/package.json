@@ -28,7 +28,8 @@
     "onLanguage:objective-cpp",
     "workspaceContains:**/*.m",
     "workspaceContains:**/*.mm",
-    "workspaceContains:**/*.xcodeproj"
+    "workspaceContains:**/*.xcodeproj",
+    "workspaceContains:**/*.h"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -36,7 +37,7 @@
       {
         "id": "objective-c",
         "aliases": ["Objective-C", "objc"],
-        "extensions": [".m"],
+        "extensions": [".m", ".h"],
         "configuration": "./language-configuration.json"
       },
       {

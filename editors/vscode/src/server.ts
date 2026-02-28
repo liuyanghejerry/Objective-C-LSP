@@ -42,6 +42,9 @@ export async function startClient(
     documentSelector: [
       { language: "objective-c" },
       { language: "objective-cpp" },
+      // .h files: VS Code assigns them "c" by default, so we also match by
+      // scheme+pattern to ensure header files get LSP features.
+      { scheme: "file", pattern: "**/*.h" },
     ],
     synchronize: {
       fileEvents: vscode.workspace.createFileSystemWatcher(

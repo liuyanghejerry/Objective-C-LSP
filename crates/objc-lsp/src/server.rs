@@ -123,6 +123,12 @@ impl Server {
             }
         }
         flags.extend(self.extra_flags.clone());
+        // Tell clang the language explicitly for header files — without this,
+        // libclang treats .h as plain C and rejects ObjC syntax.
+        if path.extension().and_then(|e| e.to_str()) == Some("h") {
+            flags.insert(0, "objective-c-header".to_owned());
+            flags.insert(0, "-x".to_owned());
+        }
         flags
     }
 
