@@ -331,7 +331,7 @@ impl Server {
                     }
                 },
                 Err(e) => {
-                    tracing::warn!("parse error: {e}");
+                    tracing::warn!("documentSymbol parse error for {:?}: {e}", uri.as_str());
                     serde_json::Value::Array(vec![])
                 }
             }

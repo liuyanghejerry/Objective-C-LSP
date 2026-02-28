@@ -10,3 +10,4 @@ lsp-types        = { workspace = true }
 tracing          = { workspace = true }
 anyhow           = { workspace = true }
 streaming-iterator = { workspace = true }
+regex            = { workspace = true }

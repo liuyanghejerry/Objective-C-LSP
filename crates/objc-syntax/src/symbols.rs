@@ -4,9 +4,13 @@
 //! walk. This is faster and more correct than query-based capture for ObjC,
 //! because the grammar stores method names as plain `identifier` children
 //! rather than named fields.
+//!
+//! When tree-sitter fails to parse (e.g. complex preprocessor conditionals),
+//! a regex-based fallback extracts symbols from the raw source text.
 
 use anyhow::Result;
 use lsp_types::{DocumentSymbol, Position, Range, SymbolKind};
+use regex::Regex;
 use tree_sitter::Node;
 
 use crate::parser::ParsedFile;
@@ -20,6 +24,13 @@ pub fn document_symbols(file: &ParsedFile) -> Result<Vec<DocumentSymbol>> {
     let mut symbols: Vec<DocumentSymbol> = Vec::new();
     collect_symbols(file.root(), src, &mut symbols);
     aggregate_categories(&mut symbols);
+
+    // Fallback: if tree-sitter produced errors and found no symbols,
+    // use regex-based extraction on the raw source text.
+    if symbols.is_empty() && file.root().has_error() {
+        return Ok(fallback_document_symbols(&file.source));
+    }
+
     Ok(symbols)
 }
 /// A flat symbol record suitable for indexing into the store.
@@ -549,6 +560,293 @@ fn node_to_range(node: Node<'_>) -> Range {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// Regex-based fallback extractor
+// ---------------------------------------------------------------------------
+
+/// Extract document symbols using regex when tree-sitter parsing fails.
+///
+/// This is a best-effort fallback for files with complex preprocessor
+/// conditionals or other constructs that confuse tree-sitter-objc.
+/// It extracts `@interface`, `@implementation`, `@protocol` blocks and
+/// nests method/property declarations inside the nearest enclosing block.
+pub fn fallback_document_symbols(source: &str) -> Vec<DocumentSymbol> {
+    // Patterns for top-level constructs
+    let re_interface = Regex::new(
+        r"(?m)^\s*@interface\s+(\w+)(?:\s*\(\s*(\w*)\s*\))?"
+    ).unwrap();
+    let re_impl = Regex::new(
+        r"(?m)^\s*@implementation\s+(\w+)(?:\s*\(\s*(\w*)\s*\))?"
+    ).unwrap();
+    let re_protocol = Regex::new(
+        r"(?m)^\s*@protocol\s+(\w+)"
+    ).unwrap();
+    let re_end = Regex::new(r"(?m)^\s*@end\b").unwrap();
+
+    // Methods: `- (type)selector...` or `+ (type)selector...`
+    let re_method = Regex::new(
+        r"(?m)^\s*[-+]\s*\([^)]*\)\s*([\w:]+(?:\s*\([^)]*\)\s*\w+\s*)*(?:\s*[\w:]+)*)"
+    ).unwrap();
+
+    // Properties: `@property (...) Type *name;`
+    let re_property = Regex::new(
+        r"(?m)^\s*@property\s*(?:\([^)]*\))?\s*(?:\w+\s*(?:<[^>]*>)?\s*\*?\s*)*?(\w+)\s*;"
+    ).unwrap();
+
+    let lines: Vec<&str> = source.lines().collect();
+
+    // Phase 1: Find top-level block boundaries (line ranges)
+    struct Block {
+        name: String,
+        kind: SymbolKind,
+        start_line: u32,
+        end_line: u32,
+        name_col: u32,
+        name_len: u32,
+    }
+
+    let mut blocks: Vec<Block> = Vec::new();
+
+    // Collect @interface/@implementation/@protocol start positions
+    struct BlockStart {
+        name: String,
+        kind: SymbolKind,
+        line: u32,
+        name_col: u32,
+        name_len: u32,
+    }
+
+    let mut starts: Vec<BlockStart> = Vec::new();
+
+    for m in re_interface.captures_iter(source) {
+        let full = m.get(0).unwrap();
+        let line = source[..full.start()].matches('\n').count() as u32;
+        let class_name = m.get(1).unwrap().as_str().to_owned();
+        let cat_name = m.get(2).map(|c| c.as_str().to_owned());
+        let name_match = m.get(1).unwrap();
+        let name_col = (name_match.start() - source[..full.start()].rfind('\n').map(|p| p + 1).unwrap_or(0)) as u32;
+        let display_name = match cat_name {
+            Some(ref c) if !c.is_empty() => format!("{class_name} ({c})"),
+            _ => class_name.clone(),
+        };
+        starts.push(BlockStart {
+            name: display_name,
+            kind: if cat_name.is_some() { SymbolKind::MODULE } else { SymbolKind::CLASS },
+            line,
+            name_col,
+            name_len: class_name.len() as u32,
+        });
+    }
+
+    for m in re_impl.captures_iter(source) {
+        let full = m.get(0).unwrap();
+        let line = source[..full.start()].matches('\n').count() as u32;
+        let class_name = m.get(1).unwrap().as_str().to_owned();
+        let cat_name = m.get(2).map(|c| c.as_str().to_owned());
+        let name_match = m.get(1).unwrap();
+        let name_col = (name_match.start() - source[..full.start()].rfind('\n').map(|p| p + 1).unwrap_or(0)) as u32;
+        let display_name = match cat_name {
+            Some(ref c) if !c.is_empty() => format!("{class_name} ({c})"),
+            _ => class_name.clone(),
+        };
+        starts.push(BlockStart {
+            name: display_name,
+            kind: SymbolKind::CLASS,
+            line,
+            name_col,
+            name_len: class_name.len() as u32,
+        });
+    }
+
+    for m in re_protocol.captures_iter(source) {
+        let full = m.get(0).unwrap();
+        let line = source[..full.start()].matches('\n').count() as u32;
+        let proto_name = m.get(1).unwrap().as_str().to_owned();
+        let name_match = m.get(1).unwrap();
+        let name_col = (name_match.start() - source[..full.start()].rfind('\n').map(|p| p + 1).unwrap_or(0)) as u32;
+        starts.push(BlockStart {
+            name: proto_name.clone(),
+            kind: SymbolKind::INTERFACE,
+            line,
+            name_col,
+            name_len: proto_name.len() as u32,
+        });
+    }
+
+    // Sort starts by line
+    starts.sort_by_key(|s| s.line);
+
+    // Collect @end positions
+    let mut ends: Vec<u32> = Vec::new();
+    for m in re_end.find_iter(source) {
+        let line = source[..m.start()].matches('\n').count() as u32;
+        ends.push(line);
+    }
+
+    // Pair starts with ends
+    for start in &starts {
+        // Find the first @end that comes after this start
+        let end_line = ends.iter()
+            .find(|&&e| e > start.line)
+            .copied()
+            .unwrap_or(lines.len().saturating_sub(1) as u32);
+        // Remove used @end so it's not reused
+        if let Some(pos) = ends.iter().position(|&e| e == end_line) {
+            ends.remove(pos);
+        }
+        blocks.push(Block {
+            name: start.name.clone(),
+            kind: start.kind,
+            start_line: start.line,
+            end_line,
+            name_col: start.name_col,
+            name_len: start.name_len,
+        });
+    }
+
+    // Phase 2: For each block, collect methods and properties within its line range
+    let mut symbols: Vec<DocumentSymbol> = Vec::new();
+
+    for block in &blocks {
+        let mut children: Vec<DocumentSymbol> = Vec::new();
+
+        // Find methods within this block's range
+        for m in re_method.captures_iter(source) {
+            let full = m.get(0).unwrap();
+            let method_line = source[..full.start()].matches('\n').count() as u32;
+            if method_line <= block.start_line || method_line >= block.end_line {
+                continue;
+            }
+
+            let selector_raw = m.get(1).unwrap().as_str();
+            let selector = normalize_selector(selector_raw);
+            if selector.is_empty() {
+                continue;
+            }
+
+            let line_text = lines.get(method_line as usize).unwrap_or(&"");
+            let end_col = line_text.len() as u32;
+
+            #[allow(deprecated)]
+            children.push(DocumentSymbol {
+                name: selector,
+                detail: None,
+                kind: SymbolKind::METHOD,
+                tags: None,
+                deprecated: None,
+                range: Range {
+                    start: Position { line: method_line, character: 0 },
+                    end: Position { line: method_line, character: end_col },
+                },
+                selection_range: Range {
+                    start: Position { line: method_line, character: 0 },
+                    end: Position { line: method_line, character: end_col },
+                },
+                children: None,
+            });
+        }
+
+        // Find properties within this block's range
+        for m in re_property.captures_iter(source) {
+            let full = m.get(0).unwrap();
+            let prop_line = source[..full.start()].matches('\n').count() as u32;
+            if prop_line <= block.start_line || prop_line >= block.end_line {
+                continue;
+            }
+
+            let prop_name = m.get(1).unwrap().as_str().to_owned();
+            let line_text = lines.get(prop_line as usize).unwrap_or(&"");
+            let end_col = line_text.len() as u32;
+
+            #[allow(deprecated)]
+            children.push(DocumentSymbol {
+                name: prop_name,
+                detail: None,
+                kind: SymbolKind::PROPERTY,
+                tags: None,
+                deprecated: None,
+                range: Range {
+                    start: Position { line: prop_line, character: 0 },
+                    end: Position { line: prop_line, character: end_col },
+                },
+                selection_range: Range {
+                    start: Position { line: prop_line, character: 0 },
+                    end: Position { line: prop_line, character: end_col },
+                },
+                children: None,
+            });
+        }
+
+        // Sort children by line
+        children.sort_by_key(|c| c.range.start.line);
+
+        let last_line = lines.len().saturating_sub(1) as u32;
+        let end_line_clamped = block.end_line.min(last_line);
+        let end_col = lines.get(end_line_clamped as usize).map(|l| l.len() as u32).unwrap_or(0);
+
+        #[allow(deprecated)]
+        symbols.push(DocumentSymbol {
+            name: block.name.clone(),
+            detail: None,
+            kind: block.kind,
+            tags: None,
+            deprecated: None,
+            range: Range {
+                start: Position { line: block.start_line, character: 0 },
+                end: Position { line: end_line_clamped, character: end_col },
+            },
+            selection_range: Range {
+                start: Position { line: block.start_line, character: block.name_col },
+                end: Position { line: block.start_line, character: block.name_col + block.name_len },
+            },
+            children: if children.is_empty() { None } else { Some(children) },
+        });
+    }
+
+    // Aggregate categories into base classes (same as tree-sitter path)
+    aggregate_categories(&mut symbols);
+    symbols
+}
+
+/// Normalize a regex-captured selector string.
+///
+/// Handles both simple (`greet`) and compound (`initWithName: ... age:`) selectors.
+/// Strips parameter types and names, keeping only keyword parts with colons.
+fn normalize_selector(raw: &str) -> String {
+    // Split by whitespace and filter for keyword:param patterns
+    let parts: Vec<&str> = raw.split_whitespace().collect();
+    if parts.is_empty() {
+        return String::new();
+    }
+
+    // Simple selector: single word without colon
+    if parts.len() == 1 && !parts[0].contains(':') {
+        return parts[0].to_owned();
+    }
+
+    // Compound selector: collect parts that end with ':'
+    let mut selector = String::new();
+    for part in &parts {
+        let trimmed = part.trim_end_matches(|c: char| c != ':' && c.is_alphanumeric());
+        if trimmed.ends_with(':') {
+            selector.push_str(trimmed);
+        } else if !part.starts_with('(') && selector.is_empty() {
+            // First word before any colon
+            if let Some(colon_pos) = part.find(':') {
+                selector.push_str(&part[..=colon_pos]);
+            } else {
+                selector.push_str(part);
+            }
+        }
+    }
+
+    if selector.is_empty() && !parts.is_empty() {
+        parts[0].to_owned()
+    } else {
+        selector
+    }
+}
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

@@ -211,3 +211,44 @@ fn semantic_tokens_types_are_valid_indices() {
         );
     }
 }
+
+// ─── fallback symbol extraction ─────────────────────────────────────────────
+
+#[test]
+fn document_symbol_fallback_for_complex_objc_file() {
+    // AFURLSessionManager.m contains preprocessor conditionals that break
+    // tree-sitter. The regex fallback should still extract symbols.
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap().parent().unwrap()
+        .join("test-projects/AFNetworking/AFNetworking/AFURLSessionManager.m");
+    if !path.exists() {
+        // Skip if test project not available
+        return;
+    }
+    let src = std::fs::read_to_string(&path).unwrap();
+    let file = parse(&src);
+    let syms = document_symbols(&file).unwrap();
+
+    // The file has @implementation AFURLSessionManager and several other blocks.
+    // Fallback should find at least some of them.
+    assert!(
+        !syms.is_empty(),
+        "expected fallback to find symbols in AFURLSessionManager.m, got 0"
+    );
+
+    let all_names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+    assert!(
+        all_names.iter().any(|n| n.contains("AFURLSessionManager")),
+        "expected AFURLSessionManager in symbols, got: {all_names:?}"
+    );
+
+    // Should also have child method symbols
+    let total_children: usize = syms.iter()
+        .filter_map(|s| s.children.as_ref())
+        .map(|c| c.len())
+        .sum();
+    assert!(
+        total_children > 0,
+        "expected methods/properties as children, got 0 children total"
+    );
+}
