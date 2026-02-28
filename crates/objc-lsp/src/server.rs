@@ -28,6 +28,7 @@ use objc_semantic::ClangIndex;
 use objc_store::{IndexStore, SymbolInput};
 use objc_syntax::{flat_symbols, inlay_hints::inlay_hints, symbols::document_symbols, tokens::semantic_tokens_full, ObjcParser};
 use objc_intelligence::code_actions::{syntax_code_actions, CodeActionContext};
+use objc_intelligence::nullability::nullability_diagnostics;
 
 use crate::capabilities::server_capabilities;
 
@@ -578,7 +579,7 @@ impl Server {
     // Diagnostics
     // -----------------------------------------------------------------------
 
-    fn publish_diagnostics(&self, uri: &Uri, _content: &str) -> Result<()> {
+    fn publish_diagnostics(&self, uri: &Uri, content: &str) -> Result<()> {
         let diagnostics = if let Some(path) = Self::uri_to_path(uri) {
             let flags = self.flags_for(&path);
             match self.clang_index.parse_file(&path, &flags) {
@@ -595,6 +596,11 @@ impl Server {
                         Ok(analyzer_diags) => diags.extend(analyzer_diags),
                         Err(e) => tracing::debug!("analyzer skipped: {e}"),
                     }
+                    // Merge nullability diagnostics (tree-sitter / text-based).
+                    let ext = path.extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("");
+                    diags.extend(nullability_diagnostics(content, ext));
                     diags
                 }
                 Err(e) => {

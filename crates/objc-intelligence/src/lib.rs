@@ -10,6 +10,7 @@
 pub mod category;
 pub mod code_actions;
 pub mod header_nav;
+pub mod nullability;
 pub mod property;
 pub mod protocol;
 pub mod selector;
