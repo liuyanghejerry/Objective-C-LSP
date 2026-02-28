@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（合成 Pod 头文件目录，解决无 `pod install` 时框架式 import 报错；commit 待提交）
+> 最后更新：2026-02-28（修复 `.h` 文件 UIKit 类型识别：-fmodules 模块支持 + 前缀头注入；commit `5dbf267`）
 
 ---
 
@@ -157,7 +157,9 @@ crates/
 | F2 | 崩溃隔离：`crash_guard` 模块（`sigsetjmp/siglongjmp` 保护 `clang_parseTranslationUnit`） | ✅ 完成 (`69cf39c`) |
 | F3 | iOS SDK 检测：读取 Podfile/podspec/pbxproj，自动切换 iPhoneSimulator SDK | ✅ 完成 (`69cf39c`) |
 | F4 | CocoaPods 头文件路径发现：自动添加 `Pods/Headers/Public/` 子目录 `-I` flags | ✅ 完成 (`69cf39c`) |
-| F5 | 合成 Pod 头文件目录：无 `Pods/` 时扫描源树创建平铺 symlink 目录，解决 `#import <PodName/Header.h>` 报红 | ✅ 完成 (本次提交) |
+| F5 | 合成 Pod 头文件目录：无 `Pods/` 时扫描源树创建平铺 symlink 目录，解决 `#import <PodName/Header.h>` 报红 | ✅ 完成 (`4af5afa`) |
+| F6 | `.h` 文件全功能 LSP：修复 documentSelector / languageId / `-x objective-c-header` 三处缺失 | ✅ 完成 (`907ff28`) |
+| F7 | UIKit 类型识别（UIViewController 等）：`-fmodules` + 项目前缀头（`.pch`）注入 | ✅ 完成 (`5dbf267`) |
 
 ### 修复详情
 
@@ -165,3 +167,5 @@ crates/
 - **iOS SIGSEGV 根因**：项目目标是 iOS，但 `default_include_flags()` 使用 macOS SDK；`CoreNFC` 等框架不存在于 macOS SDK，导致 libclang 在 `clang_parseTranslationUnit` 中 SIGSEGV。
 - **修复策略**：双保险 — 先检测 iOS 项目并切换 SDK（根治），再用 `sigsetjmp/siglongjmp` guard 防止任何残余崩溃杀死进程。
 - **框架式 import 根因（F5）**：`#import <SAKIdentityCardRecognizer/SPKNfcIdentifyCommand.h>` 需要 CocoaPods 平铺目录结构（`PodName/Foo.h`），但 `pod install` 未运行时 `Pods/` 不存在。无法用单个 `-I parent/` 解决，因为头文件实际路径有多层嵌套。**修复**：在 `/tmp/objc-lsp-headers/<hash>/` 下建立 symlink 镜像（`PodName/Foo.h → 实际路径`），并将该目录作为 `-I` 传入 libclang。外部 Pod 仍会报 "file not found"（正确行为，需 `pod install`）。
+- **`.h` 文件 LSP 不响应根因（F6）**：三处联合缺失：① VS Code 将 `.h` 识别为 `c` 语言 id 而非 `objective-c`；② extension `documentSelector` 未覆盖 `**/*.h`；③ libclang 以纯 C 解析 `.h`，未传 `-x objective-c-header`。三处同步修复。
+- **UIKit 类型未知根因（F7）**：`.h` 文件通常只写 `#import <Foundation/Foundation.h>`，而 `UIViewController` 等 UIKit 类型由 Xcode 全局注入前缀头（`GCC_PREFIX_HEADER` .pch）及 `-fmodules` 提供。**修复 A**：`find_ios_simulator_sdk()` 追加 `-fmodules -fmodule-cache-path /tmp/objc-lsp-module-cache`，与 Xcode `CLANG_ENABLE_MODULES=YES` 一致。**修复 B**：`workspace_include_flags()` 扫描工作区（最多 3 层，跳过 Pods/build/DerivedData），找含 `#import <UIKit` 的 `.pch` 并追加 `-include <path>`，复现 Xcode 前缀头全局注入效果。
