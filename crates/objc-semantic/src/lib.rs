@@ -13,5 +13,9 @@ pub mod diagnostics;
 pub mod goto_def;
 pub mod hover;
 pub mod index;
+pub mod references;
+pub mod implementation;
+pub mod protocol_stubs;
+pub mod rename;
 
 pub use index::ClangIndex;

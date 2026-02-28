@@ -11,18 +11,20 @@ use lsp_types::notification::{
     PublishDiagnostics,
 };
 use lsp_types::request::{
-    Completion, DocumentSymbolRequest, GotoDeclaration, GotoDefinition, HoverRequest,
+    CodeActionRequest, Completion, DocumentSymbolRequest, GotoDeclaration, GotoDefinition,
+    GotoImplementation, HoverRequest, InlayHintRequest, References, Rename,
     Request as _, SemanticTokensFullRequest,
 };
 use lsp_types::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    GotoDefinitionParams, HoverParams, InitializeParams, InitializeResult,
-    PublishDiagnosticsParams, SemanticTokensParams, ServerInfo, Uri,
+    CodeActionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, GotoDefinitionParams, HoverParams, InitializeParams,
+    InitializeResult, InlayHintParams, PublishDiagnosticsParams, ReferenceParams,
+    RenameParams, SemanticTokensParams, ServerInfo, Uri,
 };
 
 use objc_project::{compile_db::CompileCommandsDb, sdk, FlagResolver};
 use objc_semantic::ClangIndex;
-use objc_syntax::{symbols::document_symbols, tokens::semantic_tokens_full, ObjcParser};
+use objc_syntax::{inlay_hints::inlay_hints, symbols::document_symbols, tokens::semantic_tokens_full, ObjcParser};
 
 use crate::capabilities::server_capabilities;
 
@@ -104,6 +106,11 @@ impl Server {
             GotoDefinition::METHOD => self.on_goto_definition(req)?,
             GotoDeclaration::METHOD => self.on_goto_declaration(req)?,
             SemanticTokensFullRequest::METHOD => self.on_semantic_tokens_full(req)?,
+            References::METHOD => self.on_references(req)?,
+            GotoImplementation::METHOD => self.on_goto_implementation(req)?,
+            InlayHintRequest::METHOD => self.on_inlay_hint(req)?,
+            Rename::METHOD => self.on_rename(req)?,
+            CodeActionRequest::METHOD => self.on_code_action(req)?,
             _ => {
                 // Unknown request: send empty response to avoid client timeout.
                 let resp = Response::new_ok(req.id, serde_json::Value::Null);
@@ -225,10 +232,30 @@ impl Server {
     }
 
     fn on_completion(&mut self, req: Request) -> Result<()> {
-        // Placeholder: completions require libclang integration.
+        use lsp_types::{CompletionParams, CompletionResponse};
+
+        let (id, params): (RequestId, CompletionParams) = req.extract(Completion::METHOD)?;
+        let uri = &params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+
+        let items = if let Some(path) = Self::uri_to_path(uri) {
+            // Pass the current (possibly unsaved) buffer content so libclang
+            // can complete without reading stale files from disk.
+            let content = self.documents.get(uri).map(|d| d.content.as_str());
+            match self.clang_index.completions_at(&path, pos, content) {
+                Ok(items) => items,
+                Err(e) => {
+                    tracing::warn!("completion error: {e}");
+                    vec![]
+                }
+            }
+        } else {
+            vec![]
+        };
+
         let resp = Response::new_ok(
-            req.id,
-            serde_json::json!({"isIncomplete": false, "items": []}),
+            id,
+            serde_json::to_value(CompletionResponse::Array(items))?,
         );
         self.connection.sender.send(Message::Response(resp))?;
         Ok(())
@@ -282,6 +309,30 @@ impl Server {
         Ok(())
     }
 
+    fn on_references(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, ReferenceParams) = req.extract(References::METHOD)?;
+        let uri = &params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+        let include_decl = params.context.include_declaration;
+
+        let result = if let Some(path) = Self::uri_to_path(uri) {
+            match self.clang_index.references_at(&path, pos, include_decl) {
+                Ok(locs) if !locs.is_empty() => serde_json::to_value(locs)?,
+                Ok(_) => serde_json::Value::Null,
+                Err(e) => {
+                    tracing::warn!("find-references error: {e}");
+                    serde_json::Value::Null
+                }
+            }
+        } else {
+            serde_json::Value::Null
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
     fn on_semantic_tokens_full(&mut self, req: Request) -> Result<()> {
         let (id, params): (RequestId, SemanticTokensParams) =
             req.extract(SemanticTokensFullRequest::METHOD)?;
@@ -304,6 +355,109 @@ impl Server {
             }
         } else {
             serde_json::Value::Null
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
+    fn on_goto_implementation(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, GotoDefinitionParams) =
+            req.extract(GotoImplementation::METHOD)?;
+        let uri = &params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+
+        let result = if let Some(path) = Self::uri_to_path(uri) {
+            match self.clang_index.implementations_of(&path, pos) {
+                Ok(locs) if !locs.is_empty() => serde_json::to_value(locs)?,
+                Ok(_) => serde_json::Value::Null,
+                Err(e) => {
+                    tracing::warn!("goto-implementation error: {e}");
+                    serde_json::Value::Null
+                }
+            }
+        } else {
+            serde_json::Value::Null
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
+    fn on_inlay_hint(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, InlayHintParams) =
+            req.extract(InlayHintRequest::METHOD)?;
+        let uri = &params.text_document.uri;
+        let range = params.range;
+
+        let result = if let Some(doc) = self.documents.get(uri) {
+            let mut parser = self.parser.lock().unwrap();
+            match parser.parse(&doc.content) {
+                Ok(parsed) => match inlay_hints(&parsed, Some(range)) {
+                    Ok(hints) if !hints.is_empty() => serde_json::to_value(hints)?,
+                    Ok(_) => serde_json::Value::Array(vec![]),
+                    Err(e) => {
+                        tracing::warn!("inlay hints error: {e}");
+                        serde_json::Value::Array(vec![])
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("parse error for inlay hints: {e}");
+                    serde_json::Value::Array(vec![])
+                }
+            }
+        } else {
+            serde_json::Value::Array(vec![])
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
+    fn on_rename(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, RenameParams) = req.extract(Rename::METHOD)?;
+        let uri = &params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+        let new_name = &params.new_name;
+
+        let result = if let Some(path) = Self::uri_to_path(uri) {
+            match self.clang_index.rename_at(&path, pos, new_name) {
+                Ok(Some(edit)) => serde_json::to_value(edit)?,
+                Ok(None) => serde_json::Value::Null,
+                Err(e) => {
+                    tracing::warn!("rename error: {e}");
+                    serde_json::Value::Null
+                }
+            }
+        } else {
+            serde_json::Value::Null
+        };
+
+        let resp = Response::new_ok(id, result);
+        self.connection.sender.send(Message::Response(resp))?;
+        Ok(())
+    }
+
+    fn on_code_action(&mut self, req: Request) -> Result<()> {
+        let (id, params): (RequestId, CodeActionParams) =
+            req.extract(CodeActionRequest::METHOD)?;
+        let uri = &params.text_document.uri;
+        let range = params.range;
+
+        let result = if let Some(path) = Self::uri_to_path(uri) {
+            match self.clang_index.code_actions_at(&path, range, uri) {
+                Ok(actions) if !actions.is_empty() => serde_json::to_value(actions)?,
+                Ok(_) => serde_json::Value::Array(vec![]),
+                Err(e) => {
+                    tracing::warn!("code action error: {e}");
+                    serde_json::Value::Array(vec![])
+                }
+            }
+        } else {
+            serde_json::Value::Array(vec![])
         };
 
         let resp = Response::new_ok(id, result);

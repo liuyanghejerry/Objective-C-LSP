@@ -1,9 +1,11 @@
 //! LSP capability advertisement.
 
 use lsp_types::{
-    CompletionOptions, DocumentSymbolOptions, HoverProviderCapability, OneOf,
-    SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, WorkDoneProgressOptions,
+    CodeActionOptions, CodeActionProviderCapability, CompletionOptions, DocumentSymbolOptions,
+    HoverProviderCapability, ImplementationProviderCapability, InlayHintOptions,
+    InlayHintServerCapabilities, OneOf, RenameOptions, SemanticTokensServerCapabilities,
+    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, WorkDoneProgressOptions,
 };
 use objc_syntax::tokens::semantic_tokens_options;
 
@@ -54,6 +56,30 @@ pub fn server_capabilities() -> ServerCapabilities {
         semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
             semantic_tokens_options(),
         )),
+
+        // Go-to-implementation (protocol implementors / method definitions).
+        implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
+
+        // Inlay hints (message-send parameter labels).
+        inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(
+            InlayHintOptions {
+                resolve_provider: Some(false),
+                work_done_progress_options: WorkDoneProgressOptions::default(),
+            },
+        ))),
+
+        // Rename (coordinated property rename).
+        rename_provider: Some(OneOf::Right(RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: WorkDoneProgressOptions::default(),
+        })),
+
+        // Code actions (protocol stub generation).
+        code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
+            code_action_kinds: Some(vec![lsp_types::CodeActionKind::QUICKFIX]),
+            resolve_provider: Some(false),
+            work_done_progress_options: WorkDoneProgressOptions::default(),
+        })),
 
         // More capabilities will be added as features are implemented.
         ..Default::default()

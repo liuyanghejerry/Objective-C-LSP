@@ -12,11 +12,76 @@ use tree_sitter::Node;
 use crate::parser::ParsedFile;
 
 /// Extract a flat list of document symbols from the parsed file.
+///
+/// Categories (`@interface Foo (Cat)`) are aggregated into the base class
+/// symbol as a nested group rather than appearing as separate top-level entries.
 pub fn document_symbols(file: &ParsedFile) -> Result<Vec<DocumentSymbol>> {
     let src = file.source_bytes();
     let mut symbols: Vec<DocumentSymbol> = Vec::new();
     collect_symbols(file.root(), src, &mut symbols);
+    aggregate_categories(&mut symbols);
     Ok(symbols)
+}
+
+// ---------------------------------------------------------------------------
+// Category aggregation
+// ---------------------------------------------------------------------------
+
+/// Merge category symbols into their base class symbols.
+///
+/// After the tree walk, categories appear as top-level `MODULE` symbols
+/// named `"ClassName (CategoryName)"`.  This function folds each category's
+/// children into the matching `CLASS` symbol's children so that the IDE shows
+/// a single, unified outline for the class.
+///
+/// If no matching base-class symbol exists the category is left in place.
+fn aggregate_categories(symbols: &mut Vec<DocumentSymbol>) {
+    // Separate categories from everything else.
+    let mut categories: Vec<DocumentSymbol> = Vec::new();
+    let mut rest: Vec<DocumentSymbol> = Vec::new();
+
+    for sym in symbols.drain(..) {
+        if sym.kind == SymbolKind::MODULE && sym.name.contains('(') {
+            categories.push(sym);
+        } else {
+            rest.push(sym);
+        }
+    }
+
+    // For each category, find the base class name (the part before " (").
+    let mut orphans: Vec<DocumentSymbol> = Vec::new();
+
+    for cat in categories {
+        let base_name = cat
+            .name
+            .split_once(" (")
+            .map(|(base, _)| base)
+            .unwrap_or(&cat.name)
+            .to_owned();
+
+        // Look for a CLASS symbol with that name in `rest`.
+        let found = rest.iter_mut().find(|s| {
+            s.kind == SymbolKind::CLASS && s.name == base_name
+        });
+
+        if let Some(base) = found {
+            // Append the category's children to the base class.
+            let cat_children = cat.children.unwrap_or_default();
+            match base.children.as_mut() {
+                Some(existing) => existing.extend(cat_children),
+                None if !cat_children.is_empty() => {
+                    base.children = Some(cat_children);
+                }
+                None => {}
+            }
+        } else {
+            // No base class in scope — keep the category as-is.
+            orphans.push(cat);
+        }
+    }
+
+    *symbols = rest;
+    symbols.extend(orphans);
 }
 
 // ---------------------------------------------------------------------------
@@ -26,10 +91,16 @@ pub fn document_symbols(file: &ParsedFile) -> Result<Vec<DocumentSymbol>> {
 fn collect_symbols(node: Node<'_>, src: &[u8], out: &mut Vec<DocumentSymbol>) {
     match node.kind() {
         "class_interface" => {
-            if let Some(sym) = class_symbol(node, src, SymbolKind::CLASS) {
+            // A `class_interface` node with a `(` child is actually a category
+            // (e.g. `@interface Person (Greeting)`). Route it to category_symbol.
+            if node_has_child_kind(node, "(") {
+                if let Some(sym) = category_symbol(node, src) {
+                    out.push(sym);
+                }
+            } else if let Some(sym) = class_symbol(node, src, SymbolKind::CLASS) {
                 out.push(sym);
             }
-            // Don't recurse — children are already captured inside class_symbol.
+            // Don't recurse — children are already captured inside the builders.
             return;
         }
         "class_implementation" => {
@@ -358,6 +429,14 @@ fn find_identifier_in(node: Node<'_>, src: &[u8]) -> Option<String> {
 // Utility functions
 // ---------------------------------------------------------------------------
 
+
+/// Returns true if any direct child of `node` has the given `kind`.
+fn node_has_child_kind(node: Node<'_>, kind: &str) -> bool {
+    let mut cursor = node.walk();
+    let found = node.children(&mut cursor).any(|c| c.kind() == kind);
+    found
+}
+
 /// Return the first `identifier` child of a node (skips keywords like `-`, `+`, `@interface`).
 fn first_identifier<'a>(node: Node<'a>, _src: &[u8]) -> Option<Node<'a>> {
     let mut cursor = node.walk();
@@ -519,5 +598,48 @@ mod tests {
         let file = parse(src);
         let syms = document_symbols(&file).unwrap();
         assert!(names(&syms).contains(&"Greetable"), "{:?}", names(&syms));
+    }
+
+    #[test]
+    fn category_methods_aggregated_into_base_class() {
+        let src = concat!(
+            "@interface Person : NSObject\n",
+            "- (void)walk;\n",
+            "@end\n",
+            "@interface Person (Greeting)\n",
+            "- (void)sayHello;\n",
+            "@end\n",
+        );
+        let file = parse(src);
+        let syms = document_symbols(&file).unwrap();
+
+        // Only one top-level symbol: Person (category merged, not separate).
+        assert_eq!(
+            syms.iter().filter(|s| s.name == "Person").count(),
+            1,
+            "expected exactly one 'Person' symbol, got: {:?}",
+            names(&syms),
+        );
+
+        // The standalone 'Person (Greeting)' MODULE entry must be gone.
+        assert!(
+            !names(&syms).contains(&"Person (Greeting)"),
+            "category symbol should have been merged, got: {:?}",
+            names(&syms),
+        );
+
+        // 'sayHello' must appear in Person's children.
+        let person = syms.iter().find(|s| s.name == "Person").unwrap();
+        let child_names: Vec<&str> = person
+            .children
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert!(
+            child_names.contains(&"sayHello"),
+            "expected 'sayHello' in Person children, got: {child_names:?}",
+        );
     }
 }

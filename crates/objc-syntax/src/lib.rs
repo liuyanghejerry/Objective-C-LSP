@@ -10,5 +10,6 @@ pub mod header_detect;
 pub mod parser;
 pub mod symbols;
 pub mod tokens;
+pub mod inlay_hints;
 
 pub use parser::ObjcParser;

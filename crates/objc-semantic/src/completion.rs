@@ -5,7 +5,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use clang_sys::*;
-use lsp_types::{CompletionItem, CompletionItemKind, Documentation, Position};
+use lsp_types::{CompletionItem, CompletionItemKind, Documentation, InsertTextFormat, Position};
 
 use crate::index::ClangIndex;
 
@@ -90,9 +90,10 @@ fn cx_completion_to_lsp(result: &CXCompletionResult) -> Option<CompletionItem> {
     // Build label from typed-text chunk.
     let num_chunks = unsafe { clang_getNumCompletionChunks(string) };
     let mut label = String::new();
-    let mut insert_text = String::new();
+    // snippet holds the insertText in VSCode snippet format.
+    let mut snippet = String::new();
+    let mut snippet_count: u32 = 0;
     let mut detail = String::new();
-
     for i in 0..num_chunks {
         let chunk_kind = unsafe { clang_getCompletionChunkKind(string, i) };
         let chunk_text_cx = unsafe { clang_getCompletionChunkText(string, i) };
@@ -101,17 +102,26 @@ fn cx_completion_to_lsp(result: &CXCompletionResult) -> Option<CompletionItem> {
         match chunk_kind {
             CXCompletionChunk_TypedText => {
                 label.push_str(&chunk_text);
-                insert_text.push_str(&chunk_text);
+                snippet.push_str(&chunk_text);
             }
             CXCompletionChunk_ResultType => {
                 detail = chunk_text;
             }
             CXCompletionChunk_Placeholder => {
-                insert_text.push_str(&chunk_text);
+                // Convert clang placeholder `<#type#>` → VSCode snippet `${N:type}`.
+                let inner = chunk_text
+                    .trim_start_matches("<#")
+                    .trim_end_matches("#>")
+                    .trim();
+                snippet_count += 1;
+                snippet.push_str(&format!("${{{}:{inner}}}", snippet_count));
+                label.push_str(&chunk_text);
             }
-            CXCompletionChunk_Text
-            | CXCompletionChunk_Informative
-            | CXCompletionChunk_CurrentParameter => {
+            CXCompletionChunk_Text | CXCompletionChunk_Informative => {
+                label.push_str(&chunk_text);
+                snippet.push_str(&chunk_text);
+            }
+            CXCompletionChunk_CurrentParameter => {
                 label.push_str(&chunk_text);
             }
             _ => {}
@@ -134,13 +144,10 @@ fn cx_completion_to_lsp(result: &CXCompletionResult) -> Option<CompletionItem> {
     Some(CompletionItem {
         label,
         kind: Some(kind),
-        detail: if detail.is_empty() {
-            None
-        } else {
-            Some(detail)
-        },
+        detail: if detail.is_empty() { None } else { Some(detail) },
         documentation,
-        insert_text: Some(insert_text),
+        insert_text: Some(snippet),
+        insert_text_format: Some(InsertTextFormat::SNIPPET),
         ..Default::default()
     })
 }
