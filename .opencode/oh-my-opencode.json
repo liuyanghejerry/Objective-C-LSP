@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-opencode/master/assets/oh-my-opencode.schema.json",
+  "agents": {
+    "sisyphus": {
+      "model": "github-copilot/claude-opus-4-6"
+    },
+    "hephaestus": {
+      "model": "github-copilot/gpt-5.3-codex"
+    },
+    "oracle": {
+      "model": "github-copilot/gpt-5.2"
+    },
+    "prometheus": {
+      "model": "github-copilot/claude-opus-4-6"
+    },
+    "metis": {
+      "model": "github-copilot/claude-opus-4-6"
+    },
+    "atlas": {
+      "model": "github-copilot/claude-opus-4-6"
+    },
+    "momus": {
+      "model": "github-copilot/gpt-5.2"
+    },
+    "explore": {
+      "model": "opencode/gpt-5-nano"
+    },
+    "librarian": {
+      "model": "opencode/gpt-5-nano"
+    },
+    "multimodal-looker": {
+      "model": "github-copilot/claude-opus-4-6"
+    }
+  },
+  "categories": {
+    "visual-engineering": {
+      "model": "github-copilot/gpt-5.2"
+    },
+    "deep": {
+      "model": "github-copilot/gpt-5.3-codex"
+    },
+    "quick": {
+      "model": "opencode/gpt-5-nano"
+    },
+    "ultrabrain": {
+      "model": "github-copilot/claude-opus-4-6"
+    }
+  }
+}
