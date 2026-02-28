@@ -1,0 +1,12 @@
+# Project-local Cargo configuration
+#
+# Sets environment variables so that clang-sys can find Homebrew LLVM's
+# libclang at both build time and test runtime on macOS (Apple Silicon).
+#
+# LIBCLANG_PATH  — used by clang-sys's build script to locate libclang.dylib
+# DYLD_LIBRARY_PATH — used by macOS dyld at runtime to load libclang.dylib
+#                     and its dependency libz3.dylib (pulled in by libLLVM)
+
+[env]
+LIBCLANG_PATH = "/opt/homebrew/opt/llvm/lib"
+DYLD_LIBRARY_PATH = "/opt/homebrew/opt/llvm/lib:/opt/homebrew/lib"
