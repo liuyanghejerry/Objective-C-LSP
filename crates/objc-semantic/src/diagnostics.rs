@@ -1,4 +1,8 @@
 //! Clang diagnostics → LSP diagnostics conversion.
+//!
+//! Two diagnostic sources are supported:
+//!   - `objc-lsp` — normal compiler diagnostics from the cached TU.
+//!   - `clang-analyzer` — static analysis diagnostics re-parsed with `--analyze`.
 
 use std::ffi::CStr;
 use std::path::Path;
@@ -31,6 +35,67 @@ impl ClangIndex {
             unsafe { clang_disposeDiagnostic(cx_diag) };
         }
 
+        Ok(diags)
+    }
+
+    /// Run the Clang static analyzer on `path` and return analyzer diagnostics.
+    ///
+    /// This re-parses the file in a **temporary** TU with `--analyze` appended to
+    /// the compile flags, then harvests its diagnostics tagged with source
+    /// `"clang-analyzer"`.  The temporary TU is disposed immediately.
+    ///
+    /// Returns an empty `Vec` if parsing fails (e.g. file not on disk).
+    pub fn analyzer_diagnostics_for(
+        &self,
+        path: &Path,
+        extra_args: &[String],
+    ) -> Result<Vec<Diagnostic>> {
+        use std::ffi::CString;
+
+        let path_str = path.to_string_lossy();
+        let c_path = CString::new(path_str.as_ref())
+            .map_err(|e| anyhow::anyhow!("bad path: {e}"))?;
+
+        // Build argv with --analyze appended.
+        let mut argv_cstrings: Vec<CString> = extra_args
+            .iter()
+            .filter_map(|a| CString::new(a.as_str()).ok())
+            .collect();
+        // --analyze tells clang to run the static analyzer.
+        if let Ok(a) = CString::new("--analyze") {
+            argv_cstrings.push(a);
+        }
+        let argv_ptrs: Vec<*const i8> = argv_cstrings.iter().map(|s| s.as_ptr()).collect();
+
+        // Parse into a temporary TU — don't cache it.
+        let flags = 0; // CXTranslationUnit_None
+        let tu = unsafe {
+            clang_parseTranslationUnit(
+                self.cx,
+                c_path.as_ptr(),
+                argv_ptrs.as_ptr(),
+                argv_ptrs.len() as i32,
+                std::ptr::null_mut(),
+                0,
+                flags,
+            )
+        };
+        if tu.is_null() {
+            return Ok(Vec::new());
+        }
+
+        let num = unsafe { clang_getNumDiagnostics(tu) };
+        let mut diags = Vec::with_capacity(num as usize);
+        for i in 0..num {
+            let cx_diag = unsafe { clang_getDiagnostic(tu, i) };
+            if let Some(mut d) = cx_diagnostic_to_lsp(cx_diag) {
+                d.source = Some("clang-analyzer".to_owned());
+                diags.push(d);
+            }
+            unsafe { clang_disposeDiagnostic(cx_diag) };
+        }
+
+        unsafe { clang_disposeTranslationUnit(tu) };
         Ok(diags)
     }
 }

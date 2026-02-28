@@ -581,17 +581,22 @@ impl Server {
     fn publish_diagnostics(&self, uri: &Uri, _content: &str) -> Result<()> {
         let diagnostics = if let Some(path) = Self::uri_to_path(uri) {
             let flags = self.flags_for(&path);
-            // Write content to a temp file so libclang can parse unsaved buffers.
-            // Use unsaved_files mechanism via clang_parseTranslationUnit for production;
-            // for now parse from disk path (file must exist) or skip silently.
             match self.clang_index.parse_file(&path, &flags) {
-                Ok(()) => match self.clang_index.diagnostics_for(&path) {
-                    Ok(diags) => diags,
-                    Err(e) => {
-                        tracing::warn!("diagnostics_for error: {e}");
-                        vec![]
+                Ok(()) => {
+                    let mut diags = match self.clang_index.diagnostics_for(&path) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            tracing::warn!("diagnostics_for error: {e}");
+                            vec![]
+                        }
+                    };
+                    // Merge static analyzer diagnostics.
+                    match self.clang_index.analyzer_diagnostics_for(&path, &flags) {
+                        Ok(analyzer_diags) => diags.extend(analyzer_diags),
+                        Err(e) => tracing::debug!("analyzer skipped: {e}"),
                     }
-                },
+                    diags
+                }
                 Err(e) => {
                     tracing::debug!("parse_file skipped (file may not be on disk): {e}");
                     vec![]

@@ -11,7 +11,7 @@ use clang_sys::*;
 
 /// RAII wrapper for a `CXIndex`.
 pub struct ClangIndex {
-    cx: CXIndex,
+    pub(crate) cx: CXIndex,
     /// Cache of parsed translation units keyed by file path.
     pub(crate) units: Arc<Mutex<HashMap<PathBuf, CXTranslationUnit>>>,
 }
