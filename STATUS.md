@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（修复 goto-definition：移除 `-fmodules` 根治 `CXError_ASTReadError`，`@import` → `#import` 转换使前缀头在无 modules 时正常工作；commit `6b24af6`）
+> 最后更新：2026-02-28（修复 hover：`tight_cursor_at()` 用 token 注解获取叶节点 cursor，消除 `@implementation` 块中 hover 显示错误信息；commit `TBD`）
 
 ---
 
@@ -160,8 +160,9 @@ crates/
 | F5 | 合成 Pod 头文件目录：无 `Pods/` 时扫描源树创建平铺 symlink 目录，解决 `#import <PodName/Header.h>` 报红 | ✅ 完成 (`4af5afa`) |
 | F6 | `.h` 文件全功能 LSP：修复 documentSelector / languageId / `-x objective-c-header` 三处缺失 | ✅ 完成 (`907ff28`) |
 | F7 | UIKit 类型识别（UIViewController 等）：`-fmodules` + 项目前缀头（`.pch`）注入 | ✅ 完成 (`5dbf267`) |
-|| F8 | 富化 SDK 符号 hover：继承链/协议列表/方法签名/@property 属性 + 物理头注释回退 | ✅ 完成 (`33aae60`) |
-|| F9 | goto-definition 修复：移除 `-fmodules` 根治 `CXError_ASTReadError`；`.pch` `@import` → `#import` 转换；`UIImage`/`NSString` 现可正确跳转到 SDK .h | ✅ 完成 (`6b24af6`) |
+| F8 | 富化 SDK 符号 hover：继承链/协议列表/方法签名/@property 属性 + 物理头注释回退 | ✅ 完成 (`33aae60`) |
+| F9 | goto-definition 修复：移除 `-fmodules` 根治 `CXError_ASTReadError`；`.pch` `@import` → `#import` 转换；`UIImage`/`NSString` 现可正确跳转到 SDK .h | ✅ 完成 (`6b24af6`) |
+| F10 | hover 叶节点修复：`tight_cursor_at()` 用 `clang_tokenize`+`clang_annotateTokens` 获取 token 级 cursor，消除 `@implementation` 块中 hover 显示 `ObjCImplementationDecl` 而非实际符号的问题；增加容器体守卫 | ✅ 完成 (`TBD`) |
 
 ### 修复详情
 
@@ -173,3 +174,4 @@ crates/
 - **UIKit 类型未知根因（F7）**：`.h` 文件通常只写 `#import <Foundation/Foundation.h>`，而 `UIViewController` 等 UIKit 类型由 Xcode 全局注入前缀头（`GCC_PREFIX_HEADER` .pch）及 `-fmodules` 提供。**修复 A**：`find_ios_simulator_sdk()` 追加 `-fmodules -fmodule-cache-path /tmp/objc-lsp-module-cache`，与 Xcode `CLANG_ENABLE_MODULES=YES` 一致。**修复 B**：`workspace_include_flags()` 扫描工作区（最多 3 层，跳过 Pods/build/DerivedData），找含 `#import <UIKit` 的 `.pch` 并追加 `-include <path>`，复现 Xcode 前缀头全局注入效果。
 - **SDK hover 富化根因（F8）**：`-fmodules` 下 `clang_Cursor_getBriefCommentText` 对来自 PCM 缓存的声明返回空字符串（注释未存入编译好的模块）；且旧 hover 只显示类型名，不展示继承链/协议/方法签名。**修复 A**（富签名）：`hover_at()` 先调用 `clang_getCursorReferenced()` 解析引用到声明，再按 cursor kind 分发到专用构建函数：`@interface` 用 `clang_visitChildren` 收集 `ObjCSuperClassRef`/`ObjCProtocolRef` 子节点；方法用 `clang_getCursorResultType` + `ParmDecl` 迭代构建完整带类型签名；`@property` 用 `clang_Cursor_getObjCPropertyAttributes` 读取属性位掩码。**修复 B**（物理头注释回退）：三级策略：① `clang_Cursor_getBriefCommentText`；② `clang_Cursor_getRawCommentText`；③ 通过 `clang_getSpellingLocation` 获取物理 `.h` 文件路径，从磁盘读取并从声明行向上扫描 `/*!`/`/**`/`///`/`//!` 注释块。
 - **goto-definition 根因（F9）**：`-fmodules` 旗标导致 Xcode 的 libclang 返回 `CXError_ASTReadError`（err=4），`CXTranslationUnit` 为 null，所有跳转操作均失败。实际上 SDK 头文件（UIKit、Foundation 等）通过 `-isysroot` 即可正确解析，无需 modules。此外，当 `.pch` 前缀头包含 `@import UIKit` 时，无 `-fmodules` 情况下解析失败；通过新增 `convert_at_imports()` 辅助函数将 `@import Foo;` 转换为 `#import <Foo/Foo.h>`，并将 `.pch` 内容复制到 `/tmp/objc-lsp-headers/prefix_header_src.h`（`.h` 扩展名）供 libclang 以普通源文本而非预编译 PCH 处理。修复后 `UIImage` → `UIImage.h:77:12`、`NSString` → `NSString.h:103:12` 跳转正常。
+- **hover 叶节点根因（F10）**：`clang_getCursor` 返回最内层**包含**光标的 AST 节点，在 `@implementation` 方法体内部该节点是 `ObjCImplementationDecl`，而非实际被悬停的变量/方法引用。**修复**：新增 `tight_cursor_at()` 函数，以目标列号为中心 tokenize 单行小范围，调用 `clang_annotateTokens` 将每个 token 映射到其叶级 AST cursor，找到覆盖目标列的 token 并返回对应 cursor。同时增加容器体守卫：若解析后 cursor kind 仍为 `ObjCImplementationDecl | ObjCCategoryImplDecl | TranslationUnit`，则返回 `None`（不显示悬停）。
