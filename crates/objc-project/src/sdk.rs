@@ -191,6 +191,13 @@ pub fn workspace_include_flags(workspace_root: Option<&std::path::Path>) -> Vec<
     // Add CocoaPods public headers if Pods/ directory exists.
     if let Some(root) = workspace_root {
         flags.extend(cocoapods_flags(root));
+        // Inject project prefix header (e.g. MyApp-Prefix.pch) so that
+        // headers that rely on globally-imported UIKit / Foundation types
+        // (injected by Xcode via GCC_PREFIX_HEADER) resolve correctly.
+        if let Some(pch) = find_prefix_header(root) {
+            flags.push("-include".to_owned());
+            flags.push(pch.to_string_lossy().into_owned());
+        }
     }
 
     flags
@@ -271,6 +278,15 @@ pub fn find_ios_simulator_sdk() -> Option<SdkInfo> {
             // iOS simulator arch
             "-arch".to_owned(),
             "arm64".to_owned(),
+            // Enable Clang modules so system types like UIViewController resolve
+            // without an explicit #import <UIKit/UIKit.h> in every header.
+            // This matches Xcode's default CLANG_ENABLE_MODULES = YES behaviour.
+            "-fmodules".to_owned(),
+            "-fmodule-cache-path".to_owned(),
+            std::env::temp_dir()
+                .join("objc-lsp-module-cache")
+                .to_string_lossy()
+                .into_owned(),
             // Suppress warnings about non-portable Apple-specific pragmas
             "-Wno-unknown-pragmas".to_owned(),
             "-Wno-error".to_owned(),
@@ -329,6 +345,69 @@ pub fn detect_ios_project(root: &std::path::Path) -> bool {
     }
 
     false
+}
+
+/// Locate the project prefix header (`.pch`) so we can inject it with
+/// `-include <path>`, matching Xcode's `GCC_PREFIX_HEADER` behaviour.
+///
+/// Search strategy (workspace_root and one level of subdirectories):
+/// 1. `<root>/<Name>-Prefix.pch`   — CocoaPods example app pattern
+/// 2. `<root>/**/*-Prefix.pch`     — common Xcode template pattern
+/// 3. Any `*.pch` that imports UIKit (most likely the app prefix header)
+///
+/// Returns the first `.pch` found that contains `#import <UIKit` or
+/// `#import <AppKit`, so we don't accidentally pick up test prefix headers.
+pub fn find_prefix_header(workspace_root: &std::path::Path) -> Option<std::path::PathBuf> {
+    // Walk at most 3 levels deep — prefix headers are always near the root.
+    find_pch_recursive(workspace_root, 0, 3)
+}
+
+fn find_pch_recursive(
+    dir: &std::path::Path,
+    depth: usize,
+    max_depth: usize,
+) -> Option<std::path::PathBuf> {
+    let rd = std::fs::read_dir(dir).ok()?;
+    let mut subdirs: Vec<std::path::PathBuf> = Vec::new();
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        // Skip hidden dirs and build artefacts.
+        if name_str.starts_with('.') {
+            continue;
+        }
+        let ft = entry.file_type().ok()?;
+        if ft.is_dir() {
+            if depth < max_depth
+                && name_str != "Pods"
+                && name_str != "build"
+                && name_str != "DerivedData"
+                && name_str != "node_modules"
+            {
+                subdirs.push(path);
+            }
+        } else if name_str.ends_with(".pch") {
+            // Only inject prefix headers that pull in a UI framework —
+            // those are the ones that provide implicit UIViewController etc.
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                if text.contains("#import <UIKit")
+                    || text.contains("#import <AppKit")
+                    || text.contains("@import UIKit")
+                    || text.contains("@import AppKit")
+                {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    // BFS: recurse into subdirectories after scanning current level.
+    for sub in subdirs {
+        if let Some(found) = find_pch_recursive(&sub, depth + 1, max_depth) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// Return `-I` flags for CocoaPods public headers.
