@@ -1,0 +1,12 @@
+[package]
+name    = "objc-intelligence"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+objc-syntax = { path = "../objc-syntax" }
+objc-store  = { path = "../objc-store" }
+
+lsp-types  = { workspace = true }
+tracing    = { workspace = true }
+anyhow     = { workspace = true }

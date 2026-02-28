@@ -1,0 +1,12 @@
+[package]
+name    = "objc-syntax"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tree-sitter      = { workspace = true }
+tree-sitter-objc = { workspace = true }
+lsp-types        = { workspace = true }
+tracing          = { workspace = true }
+anyhow           = { workspace = true }
+streaming-iterator = { workspace = true }

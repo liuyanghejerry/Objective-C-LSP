@@ -1,0 +1,13 @@
+//! Fast syntax layer for Objective-C using tree-sitter.
+//!
+//! Provides millisecond-latency, error-tolerant parsing for:
+//! - Document symbols (outline)
+//! - Syntax highlighting tokens
+//! - Folding ranges
+//! - Header language detection (.h → ObjC vs C/C++)
+
+pub mod header_detect;
+pub mod parser;
+pub mod symbols;
+
+pub use parser::ObjcParser;

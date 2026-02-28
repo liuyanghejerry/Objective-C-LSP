@@ -1,0 +1,14 @@
+[package]
+name    = "objc-semantic"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+objc-syntax = { path = "../objc-syntax" }
+objc-store  = { path = "../objc-store" }
+
+clang-sys  = { workspace = true }
+lsp-types  = { workspace = true }
+tracing    = { workspace = true }
+anyhow     = { workspace = true }
+thiserror  = { workspace = true }
