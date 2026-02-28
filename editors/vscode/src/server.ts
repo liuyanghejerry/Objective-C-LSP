@@ -29,10 +29,15 @@ export async function startClient(
     command: serverBin,
     args: ["--log-level", config.logLevel],
     options: {
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        // Ensure dyld can resolve libclang.dylib at runtime.
+        // libclang's install name uses @@HOMEBREW_PREFIX@@ which dyld
+        // cannot resolve without DYLD_LIBRARY_PATH being set explicitly.
+        DYLD_LIBRARY_PATH: `/opt/homebrew/opt/llvm/lib:/opt/homebrew/lib${process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : ''}`,
+      },
     },
   };
-
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
       { language: "objective-c" },

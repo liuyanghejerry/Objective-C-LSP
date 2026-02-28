@@ -83,9 +83,13 @@ impl Server {
 
         let base_flags = sdk::default_include_flags();
 
+        tracing::info!("Server::new: creating ClangIndex...");
         let clang_index = Arc::new(ClangIndex::new()?);
+        tracing::info!("Server::new: ClangIndex created");
 
+        tracing::info!("Server::new: creating IndexStore...");
         let store = Arc::new(IndexStore::in_memory()?);
+        tracing::info!("Server::new: IndexStore created");
 
         Ok(Self {
             connection,
