@@ -132,13 +132,43 @@ impl Server {
         flags
     }
 
-    /// URI → filesystem path (strips `file://` prefix).
+    /// URI → filesystem path (strips `file://` prefix, percent-decodes path).
     fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
         let s = uri.as_str();
-        if let Some(p) = s.strip_prefix("file://") {
-            Some(PathBuf::from(p))
-        } else {
-            None
+        let p = s.strip_prefix("file://")?;
+        // Percent-decode %XX sequences so that filenames with '+' (%2B),
+        // spaces (%20), etc. resolve to the correct on-disk path.
+        let decoded = Self::percent_decode(p);
+        Some(PathBuf::from(decoded))
+    }
+
+    /// Decode percent-encoded sequences in a URI path component.
+    fn percent_decode(s: &str) -> String {
+        let bytes = s.as_bytes();
+        let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                if let (Some(hi), Some(lo)) =
+                    (Self::hex_val(bytes[i + 1]), Self::hex_val(bytes[i + 2]))
+                {
+                    out.push((hi << 4) | lo);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(bytes[i]);
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    fn hex_val(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
         }
     }
 
