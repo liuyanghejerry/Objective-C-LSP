@@ -33,18 +33,13 @@ impl ClangIndex {
             }
             let location = unsafe { clang_getLocation(tu, file, pos.line + 1, pos.character + 1) };
 
-            // Use token-based cursor lookup so we get the *leaf* cursor at the
-            // hovered token rather than the enclosing container cursor.
-            // clang_getCursor alone returns the innermost *enclosing* cursor,
-            // which inside a @implementation body is the ObjCImplementationDecl.
-            let cursor = tight_cursor_at(tu, file, pos.line + 1, pos.character + 1)
-                .unwrap_or_else(|| unsafe { clang_getCursor(tu, location) });
+            // Resolve to the canonical declaration cursor so we get full type
+            // information (e.g. when hovering a reference, jump to the decl).
+            let cursor = unsafe { clang_getCursor(tu, location) };
             if unsafe { clang_Cursor_isNull(cursor) } != 0 {
                 return Ok(None);
             }
 
-            // Resolve to the canonical declaration cursor so we get full type
-            // information (e.g. when hovering a reference, jump to the decl).
             let decl_cursor = unsafe { clang_getCursorReferenced(cursor) };
             let resolved = if unsafe { clang_Cursor_isNull(decl_cursor) } == 0 {
                 decl_cursor
@@ -65,18 +60,29 @@ impl ClangIndex {
             if is_preprocessor {
                 return Ok(None);
             }
-            // Suppress hover for "container body" cursors that arise when clang_getCursor
-            // returns the enclosing @implementation / @interface / method instead of a
-            // real leaf symbol. These only produce meaningful hover on their own name
-            // token (which tight_cursor_at handles correctly); everywhere else inside
-            // the body they are noise.
-            let is_container_body = matches!(
+            // Suppress hover when clang_getCursor returned a container-body cursor
+            // (ObjCImplementationDecl, etc.) AND getCursorReferenced didn't find
+            // anything more specific. This happens when the user hovers over
+            // whitespace, braces, or keywords between declarations — the cursor
+            // is the enclosing @implementation but there's no real symbol to show.
+            //
+            // We do NOT suppress when getCursorReferenced resolved to a different,
+            // concrete symbol (e.g. hovering a method call inside the body gives a
+            // ObjCInstanceMethodDecl reference — that's useful and should be shown).
+            let raw_kind = unsafe { clang_getCursorKind(cursor) };
+            let is_raw_container = matches!(
+                raw_kind,
+                CXCursor_ObjCImplementationDecl
+                    | CXCursor_ObjCCategoryImplDecl
+                    | CXCursor_TranslationUnit
+            );
+            let resolved_is_same_container = matches!(
                 kind,
                 CXCursor_ObjCImplementationDecl
                     | CXCursor_ObjCCategoryImplDecl
                     | CXCursor_TranslationUnit
             );
-            if is_container_body {
+            if is_raw_container && resolved_is_same_container {
                 return Ok(None);
             }
 
@@ -484,72 +490,6 @@ fn extract_preceding_comment(lines: &[&str], decl_line: usize) -> Option<String>
     }
 
     None
-}
-
-// ---------------------------------------------------------------------------
-// Token-based tight cursor lookup
-// ---------------------------------------------------------------------------
-
-/// Find the *leaf* cursor at a given source position using token annotation.
-///
-/// `clang_getCursor` returns the innermost *enclosing* AST cursor, which
-/// inside an `@implementation` body is the `ObjCImplementationDecl`.
-/// This function instead tokenizes a tiny range around the position,
-/// uses `clang_annotateTokens` to map each token to its AST cursor, and
-/// returns the cursor for the token that covers the given column.
-///
-/// Returns `None` if no token is found at the position (e.g. whitespace).
-fn tight_cursor_at(tu: CXTranslationUnit, file: CXFile, line: u32, col: u32) -> Option<CXCursor> {
-    // Tokenize a single-line range that spans a few characters around the
-    // target column to capture the token at that position.
-    let col_start = col.saturating_sub(1).max(1);
-    let col_end = col + 64; // wide enough to cover any identifier
-
-    let start_loc = unsafe { clang_getLocation(tu, file, line, col_start) };
-    let end_loc = unsafe { clang_getLocation(tu, file, line, col_end) };
-    let range = unsafe { clang_getRange(start_loc, end_loc) };
-    if unsafe { clang_Range_isNull(range) } != 0 {
-        return None;
-    }
-
-    let mut tokens: *mut CXToken = std::ptr::null_mut();
-    let mut n_tokens: u32 = 0;
-    unsafe { clang_tokenize(tu, range, &mut tokens, &mut n_tokens) };
-    if tokens.is_null() || n_tokens == 0 {
-        return None;
-    }
-
-    // Allocate matching cursor array and annotate.
-    let mut cursors: Vec<CXCursor> = vec![unsafe { clang_getNullCursor() }; n_tokens as usize];
-    unsafe { clang_annotateTokens(tu, tokens, n_tokens, cursors.as_mut_ptr()) };
-
-    // Find the token whose extent contains `col`.
-    let mut best: Option<CXCursor> = None;
-    for i in 0..n_tokens as usize {
-        let tok = unsafe { *tokens.add(i) };
-        let tok_range = unsafe { clang_getTokenExtent(tu, tok) };
-        let tok_start = unsafe { clang_getRangeStart(tok_range) };
-        let tok_end = unsafe { clang_getRangeEnd(tok_range) };
-        let mut ts_line: u32 = 0;
-        let mut ts_col: u32 = 0;
-        let mut te_line: u32 = 0;
-        let mut te_col: u32 = 0;
-        unsafe {
-            clang_getSpellingLocation(tok_start, std::ptr::null_mut(), &mut ts_line, &mut ts_col, std::ptr::null_mut());
-            clang_getSpellingLocation(tok_end,   std::ptr::null_mut(), &mut te_line, &mut te_col, std::ptr::null_mut());
-        }
-        // Accept token if our target position falls within its extent.
-        if ts_line == line && te_line == line && ts_col <= col && col <= te_col {
-            let c = cursors[i];
-            if unsafe { clang_Cursor_isNull(c) } == 0 {
-                best = Some(c);
-                break;
-            }
-        }
-    }
-
-    unsafe { clang_disposeTokens(tu, tokens, n_tokens) };
-    best
 }
 
 
