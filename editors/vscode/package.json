@@ -1,0 +1,120 @@
+{
+  "name": "objc-lsp",
+  "displayName": "Objective-C Language Server",
+  "description": "First-class Objective-C language support via objc-lsp (completion, hover, diagnostics, rename, and more)",
+  "version": "0.1.0",
+  "publisher": "objc-lsp",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "objective-c",
+    "objc",
+    "lsp",
+    "language-server"
+  ],
+  "activationEvents": [
+    "onLanguage:objective-c",
+    "onLanguage:objective-cpp",
+    "workspaceContains:**/*.m",
+    "workspaceContains:**/*.mm",
+    "workspaceContains:**/*.xcodeproj"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "objective-c",
+        "aliases": ["Objective-C", "objc"],
+        "extensions": [".m"],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "objective-cpp",
+        "aliases": ["Objective-C++", "objcpp"],
+        "extensions": [".mm"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "objective-c",
+        "scopeName": "source.objc",
+        "path": "./syntaxes/objc.tmLanguage.json"
+      },
+      {
+        "language": "objective-cpp",
+        "scopeName": "source.objcpp",
+        "path": "./syntaxes/objc.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Objective-C LSP",
+      "properties": {
+        "objc-lsp.serverPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the `objc-lsp` binary. Leave empty to auto-discover from `$PATH` or the bundled binary."
+        },
+        "objc-lsp.logLevel": {
+          "type": "string",
+          "enum": ["error", "warn", "info", "debug"],
+          "default": "info",
+          "description": "Log verbosity of the objc-lsp server process."
+        },
+        "objc-lsp.extraCompilerFlags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Extra flags passed to clang for every translation unit, e.g. `[\"-DDEBUG\", \"-I/usr/local/include\"]`."
+        },
+        "objc-lsp.enableNullabilityChecks": {
+          "type": "boolean",
+          "default": true,
+          "description": "Report missing nullability annotations (NS_ASSUME_NONNULL regions)."
+        },
+        "objc-lsp.enableStaticAnalyzer": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run clang --analyze on save (slower; recommended only on explicit trigger)."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "objc-lsp.restart",
+        "title": "ObjC: Restart Language Server"
+      },
+      {
+        "command": "objc-lsp.showOutput",
+        "title": "ObjC: Show Language Server Output"
+      },
+      {
+        "command": "objc-lsp.reportIssue",
+        "title": "ObjC: Report an Issue"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "package": "vsce package",
+    "lint": "eslint src --ext ts"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.0"
+  }
+}

@@ -1,6 +1,6 @@
 # Objective-C LSP — 进展状态
 
-> 最后更新：2026-02-28（Phase 3 全部 7/7 功能完成；Phase 4 VS Code 扩展已列入规划）
+> 最后更新：2026-02-28（Phase 4 VS Code 扩展全部 8/8 功能完成）
 
 ---
 
@@ -11,7 +11,7 @@
 | Phase 1 — 核心骨架（MVP） | ✅ 完成 | 8/8 功能 |
 | Phase 2 — ObjC 专属功能 | ✅ 完成 | 7/7 功能 |
 | Phase 3 — 高级功能 | ✅ 完成 | 7/7 功能 |
-| Phase 4 — VS Code 扩展 | ⏳ 未开始 | 0/8 功能 |
+| Phase 4 — VS Code 扩展 | ✅ 完成 | 8/8 功能 |
 
 ---
 
@@ -134,11 +134,13 @@ crates/
 
 | # | 功能 | 状态 |
 |---|------|------|
-| 23 | LSP 客户端集成（`vscode-languageclient` 启动 `objc-lsp`） | ⏳ 未开始 |
-| 24 | 二进制自动发现与安装引导 | ⏳ 未开始 |
-| 25 | 语言 id 注册（`.m`、`.mm`、`.h` → `objective-c`） | ⏳ 未开始 |
-| 26 | TextMate 语法增强（block、消息发送、编译器指令） | ⏳ 未开始 |
-| 27 | 工作区设置（serverPath / logLevel / extraCompilerFlags 等） | ⏳ 未开始 |
-| 28 | 状态栏指示器（⚡ Indexing / ✓ Ready / ✗ Error） | ⏳ 未开始 |
-| 29 | 命令面板（Restart / Show Output / Report Issue） | ⏳ 未开始 |
-| 30 | initializationOptions 传递用户设置给 objc-lsp | ⏳ 未开始 |
+| 23 | LSP 客户端集成（`vscode-languageclient` 启动 `objc-lsp`） | ✅ 完成 |
+| 24 | 二进制自动发现与安装引导 | ✅ 完成 |
+| 25 | 语言 id 注册（`.m`、`.mm`、`.h` → `objective-c`） | ✅ 完成 |
+| 26 | TextMate 语法增强（block、消息发送、编译器指令） | ✅ 完成 |
+| 27 | 工作区设置（serverPath / logLevel / extraCompilerFlags 等） | ✅ 完成 |
+| 28 | 状态栏指示器（⚡ Indexing / ✓ Ready / ✗ Error） | ✅ 完成 |
+| 29 | 命令面板（Restart / Show Output / Report Issue） | ✅ 完成 |
+| 30 | initializationOptions 传递用户设置给 objc-lsp | ✅ 完成 |
+
+**Phase 4 提交**:
