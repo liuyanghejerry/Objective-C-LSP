@@ -86,7 +86,12 @@ impl ClangIndex {
             bail!("clang_parseTranslationUnit failed for {:?}", path);
         }
 
-        self.units.lock().unwrap().insert(path.to_path_buf(), tu);
+        // Dispose the old TU if we are re-parsing the same file (e.g. on didChange).
+        // HashMap::insert returns the old value which is a raw CXTranslationUnit pointer;
+        // dropping it without calling clang_disposeTranslationUnit would leak memory.
+        if let Some(old_tu) = self.units.lock().unwrap().insert(path.to_path_buf(), tu) {
+            unsafe { clang_disposeTranslationUnit(old_tu) };
+        }
         Ok(())
     }
 

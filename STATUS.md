@@ -241,3 +241,25 @@ code --install-extension objc-lsp-0.1.0.vsix --force
 ```
 
 如果只修改了 Rust 代码（未修改 TypeScript），只需执行步骤 1 和 4。
+
+---
+
+## 内存分析备忘
+
+### 已修复
+
+- **P0 — CXTranslationUnit 泄漏**（`index.rs:89`）：`parse_file()` 在 `HashMap::insert()` 时未 dispose 旧 TU。`on_did_change` 每次触发都会泄漏一个 CXTranslationUnit（每次按键后全量同步）。已修复：插入前检查并 dispose 旧值。
+
+### 待观察（非紧急）
+
+- **P1 — TU 缓存无上限**：`ClangIndex.units` 没有 LRU/大小限制。用户打开 N 个文件就缓存 N 个 TU，直到文件关闭。对于 ObjC 项目（通常同时打开文件数有限）可接受，但如需严格控制内存可加 LRU 淘汰策略。
+- **P2 — rename 操作临时内存倍增**：`rename_across_all_files` 会 `.collect()` 所有 TU 到 `Vec`，短暂翻倍内存占用。属于操作性峰值，非泄漏。
+
+### 已验证安全的结构
+
+- `Server.documents`：didOpen 插入，didClose 移除 ✅
+- `ObjcParser`：单实例复用 tree-sitter Parser，不缓存 parse tree ✅
+- `IndexStore`：SQLite 磁盘存储，DELETE+INSERT 模式，LIMIT 100 ✅
+- `CompileCommandsDb`：启动时加载一次，不再增长 ✅
+- `crash_guard`：Thread-local Cell 指针，每次调用后清理 ✅
+- `base_flags / extra_flags`：初始化时设定，不再增长 ✅
