@@ -39,13 +39,25 @@ Beyond standard LSP features, the VS Code extension provides:
 - **Call Graph Webview** — Interactive method call relationship visualization
 - **Hover Extensions** — API availability parsing, deprecation warnings, related methods with clickable navigation, quick fix links
 
+### Zed Extension
+
+The Zed extension brings objc-lsp to the [Zed editor](https://zed.dev) with:
+
+- **Syntax Highlighting** — Tree-sitter based highlighting for Objective-C (`.m`, `.h`) and Objective-C++ (`.mm`)
+- **LSP Integration** — Auto-downloads the objc-lsp binary from GitHub Releases at runtime
+- **Code Folding** — Collapse `@interface`/`@implementation` blocks, methods, and comment regions
+- **Text Objects** — Structural selection for classes, methods, and comments
+- **Bracket Matching** — Automatic bracket pair detection
+- **Outline View** — Navigate class interfaces, implementations, protocols, methods, and properties
+- **Grammar** — Uses community-maintained [`tree-sitter-grammars/tree-sitter-objc`](https://github.com/tree-sitter-grammars/tree-sitter-objc)
+
 ## Architecture
 
 objc-lsp uses a **dual-layer parsing architecture**: tree-sitter for fast, fault-tolerant operations (~1ms/file) and libclang for precise semantic analysis.
 
 ```
 ┌─────────────────────────────────────────────┐
-│            Editor (VS Code / Neovim / ...)   │
+│       Editor (VS Code / Zed / Neovim / ...)   │
 │              LSP JSON-RPC over stdio         │
 └──────────────────┬──────────────────────────┘
                    │
@@ -110,7 +122,7 @@ objc-lsp uses a **dual-layer parsing architecture**: tree-sitter for fast, fault
 - **Rust** (stable, 1.75+) — for building the LSP server
 - **libclang** — provided by Xcode (macOS) or LLVM (Linux)
 - **Node.js** (18+) — for building the VS Code extension
-- **VS Code** (1.85+) — editor
+- **VS Code** (1.85+) and/or **Zed** (1.x+) — editor
 
 On macOS with Xcode installed, libclang is available automatically. On Linux, install LLVM:
 
@@ -138,6 +150,12 @@ npm install
 node esbuild.mjs
 npx vsce package --no-dependencies
 code --install-extension objc-lsp-0.1.0.vsix --force
+```
+
+For the Zed extension, install as a dev extension:
+
+```
+Open Zed → Extensions → Install Dev Extension → select editors/zed
 ```
 
 ### Configuration
@@ -180,10 +198,16 @@ objective-c-lsp/
 │   ├── objc-project/             # Build system integration
 │   └── objc-store/               # SQLite index
 ├── editors/
-│   └── vscode/                   # VS Code extension (TypeScript)
-│       ├── src/                  # Extension source
-│       ├── syntaxes/             # TextMate grammar
-│       └── snippets/             # ObjC code snippets
+│   ├── vscode/                   # VS Code extension (TypeScript)
+│   │   ├── src/                  # Extension source
+│   │   ├── syntaxes/             # TextMate grammar
+│   │   └── snippets/             # ObjC code snippets
+│   └── zed/                      # Zed extension (Rust → WASM)
+│       ├── src/lib.rs            # Extension entry point
+│       ├── extension.toml        # Extension manifest + grammar config
+│       └── languages/            # Tree-sitter query files (.scm)
+│           ├── objective-c/      # Highlights, folds, outline, etc.
+│           └── objective-cpp/    # Symlinks to objective-c/
 └── tests/
     └── fixtures/                 # Test ObjC projects
 ```
@@ -215,6 +239,13 @@ npx vsce package --no-dependencies
 code --install-extension objc-lsp-0.1.0.vsix --force
 ```
 
+For the Zed extension:
+
+```
+# Zed extension: install as dev extension
+Open Zed → Extensions → Install Dev Extension → select editors/zed
+```
+
 ### Key Dependencies
 
 | Dependency | Version | Purpose |
@@ -226,6 +257,7 @@ code --install-extension objc-lsp-0.1.0.vsix --force
 | `clang-sys` | 1.8 | libclang FFI bindings |
 | `rusqlite` | 0.31 | SQLite index storage |
 | `tokio` | 1 | Async runtime |
+| `zed_extension_api` | 0.5.0 | Zed extension WASM API |
 
 ## Platform Support
 
