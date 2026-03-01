@@ -14,12 +14,12 @@
 "@selector" @keyword
 "@encode" @keyword
 "@protocol" @keyword
-"@optional" @keyword
-"@required" @keyword
-"@public" @keyword
-"@private" @keyword
-"@protected" @keyword
-"@package" @keyword
+(optional) @keyword
+(required) @keyword
+(public) @keyword
+(private) @keyword
+(protected) @keyword
+(package) @keyword
 "@try" @keyword
 "@catch" @keyword
 "@finally" @keyword
@@ -157,7 +157,26 @@
 
 ; Property attributes: nonatomic, strong, readonly, etc.
 (property_attributes
-  (identifier) @attribute)
+  [
+    (nonatomic)
+    (atomic)
+    (strong)
+    (weak)
+    (copy)
+    (retain)
+    (assign)
+    (unsafe_unretained)
+    (readonly)
+    (readwrite)
+    (getter)
+    (setter)
+    (nullable)
+    (nonnull)
+    (null_resettable)
+    (null_unspecified)
+    (direct)
+    (class)
+  ] @attribute)
 
 ; @synthesize and @dynamic
 (synthesize_definition

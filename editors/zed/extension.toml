@@ -6,9 +6,9 @@ authors = ["objc-lsp contributors <objc-lsp@users.noreply.github.com>"]
 description = "Objective-C language support via objc-lsp: completion, hover, diagnostics, rename, and more."
 repository = "https://github.com/objc-lsp/objc-lsp"
 
-[grammars.objective_c]
+[grammars.objc]
 repository = "https://github.com/jiyee/tree-sitter-objc"
-rev = "62e61a12f893e6e21e30ba13e7399a6eb0144942"
+rev = "afec0de5a32d5894070b67932d6ff09e4f7c5879"
 
 [language_servers.objc-lsp]
 name = "objc-lsp"
