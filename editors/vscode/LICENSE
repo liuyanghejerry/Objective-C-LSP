@@ -1,21 +1,29 @@
-MIT License
+Copyright (c) 2024-2026 objc-lsp contributors.
 
-Copyright (c) 2024 objc-lsp contributors
+EARLY ACCESS LICENSE
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This VS Code extension and the bundled objc-lsp language server binary are
+provided as pre-compiled software for personal and commercial use.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+You MAY:
+  - Use this software for any purpose (personal, educational, commercial)
+  - Install and run this software on any number of machines you own or control
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+You MAY NOT:
+  - Reverse-engineer, decompile, or disassemble the bundled binary
+  - Redistribute the bundled binary in modified form
+  - Remove or alter this license notice
+
+The TypeScript extension source code (editors/vscode/src/) is available under
+the MIT License at: https://github.com/objc-lsp/objc-lsp
+
+The objc-lsp server binary is distributed in compiled form only during the
+early access period. The source code may be open-sourced at a later date.
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.

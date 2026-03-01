@@ -1,0 +1,164 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  EXTENSION_DIR: editors/vscode
+
+jobs:
+  # ── Step 1: Build platform-specific Rust binaries ──────────────────────────
+  build-binary:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            rust-target: aarch64-apple-darwin
+            vsce-target: darwin-arm64
+          - os: macos-13
+            rust-target: x86_64-apple-darwin
+            vsce-target: darwin-x64
+          - os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            vsce-target: linux-x64
+          - os: ubuntu-latest
+            rust-target: aarch64-unknown-linux-gnu
+            vsce-target: linux-arm64
+            cross: true
+
+    runs-on: ${{ matrix.os }}
+    name: Build binary (${{ matrix.vsce-target }})
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      # Linux ARM64: cross-compilation toolchain
+      - name: Install cross-compilation tools
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      # macOS: ensure Xcode provides libclang
+      - name: Select Xcode
+        if: runner.os == 'macOS'
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      # Linux: install libclang-dev
+      - name: Install libclang
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.rust-target }} -p objc-lsp
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.vsce-target }}
+          path: target/${{ matrix.rust-target }}/release/objc-lsp
+          if-no-files-found: error
+          retention-days: 1
+
+  # ── Step 2: Package platform-specific .vsix files ──────────────────────────
+  package-vsix:
+    needs: build-binary
+    runs-on: ubuntu-latest
+    name: Package VSIX (${{ matrix.vsce-target }})
+
+    strategy:
+      matrix:
+        vsce-target:
+          - darwin-arm64
+          - darwin-x64
+          - linux-x64
+          - linux-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install extension dependencies
+        working-directory: ${{ env.EXTENSION_DIR }}
+        run: npm ci
+
+      - name: Build extension
+        working-directory: ${{ env.EXTENSION_DIR }}
+        run: node esbuild.mjs
+
+      - name: Download platform binary
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.vsce-target }}
+          path: ${{ env.EXTENSION_DIR }}/bin
+
+      - name: Make binary executable
+        run: chmod +x ${{ env.EXTENSION_DIR }}/bin/objc-lsp
+
+      - name: Package platform-specific VSIX
+        working-directory: ${{ env.EXTENSION_DIR }}
+        run: npx vsce package --target ${{ matrix.vsce-target }} --no-dependencies
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.vsce-target }}
+          path: ${{ env.EXTENSION_DIR }}/*.vsix
+          if-no-files-found: error
+          retention-days: 5
+
+  # ── Step 3: Publish to GitHub Releases ─────────────────────────────────────
+  publish:
+    needs: package-vsix
+    runs-on: ubuntu-latest
+    name: Publish Release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all VSIX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          path: vsix-artifacts
+          merge-multiple: true
+
+      - name: List VSIX files
+        run: ls -lh vsix-artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: vsix-artifacts/*.vsix
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') }}
+
+      # ── Uncomment to publish to VS Code Marketplace ──
+      # - uses: actions/setup-node@v4
+      #   with:
+      #     node-version: 20
+      #
+      # - name: Install vsce
+      #   run: npm install -g @vscode/vsce
+      #
+      # - name: Publish to Marketplace
+      #   run: vsce publish --packagePath vsix-artifacts/*.vsix
+      #   env:
+      #     VSCE_PAT: ${{ secrets.VSCE_PAT }}

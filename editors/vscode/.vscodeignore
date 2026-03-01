@@ -1,5 +1,14 @@
-/node_modules/
-/dist/
-/out/
-/.vscode-test/
+# Source files (not needed at runtime)
+src/
+tsconfig.json
+esbuild.mjs
+package-lock.json
+
+# Development dependencies
+node_modules/
+
+# Build artifacts that shouldn't be in .vsix
 *.vsix
+.vscode-test/
+
+# dist/ and bin/ are NOT excluded — they must be packaged
