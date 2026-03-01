@@ -8,6 +8,7 @@ import { registerCodeLens } from "./codelens";
 import { registerDecorators } from "./decorators";
 import { registerTreeViews } from "./treeviews";
 import { registerCallGraph } from "./callgraph";
+import { registerHoverExtensions } from "./hover";
 
 export async function activate(
   context: vscode.ExtensionContext
@@ -100,6 +101,10 @@ export async function activate(
 
   // ── Call Graph ─────────────────────────────────────────────────────────────
   registerCallGraph(context);
+
+  // ── Hover Extensions ────────────────────────────────────────────────────
+  registerHoverExtensions(context);
+
   // ── Restart on server-path change ─────────────────────────────────────────
 
   context.subscriptions.push(
