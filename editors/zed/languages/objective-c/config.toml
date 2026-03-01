@@ -1,0 +1,17 @@
+name = "Objective-C"
+grammar = "objective_c"
+path_suffixes = ["m", "h"]
+line_comments = ["// "]
+block_comment = ["/*", "*/"]
+tab_size = 4
+hard_tabs = false
+
+brackets = [
+  { start = "{", end = "}", close = true, newline = true },
+  { start = "[", end = "]", close = true, newline = false },
+  { start = "(", end = ")", close = true, newline = false },
+  { start = "\"", end = "\"", close = true, newline = false, not_in = ["string", "comment"] },
+  { start = "'", end = "'", close = true, newline = false, not_in = ["string", "comment"] },
+]
+
+word_characters = ["_"]

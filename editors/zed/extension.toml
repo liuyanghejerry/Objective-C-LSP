@@ -1,0 +1,15 @@
+id = "objc-lsp"
+name = "Objective-C"
+version = "0.1.0"
+schema_version = 1
+authors = ["objc-lsp contributors <objc-lsp@users.noreply.github.com>"]
+description = "Objective-C language support via objc-lsp: completion, hover, diagnostics, rename, and more."
+repository = "https://github.com/objc-lsp/objc-lsp"
+
+[grammars.objective_c]
+repository = "https://github.com/jiyee/tree-sitter-objc"
+rev = "62e61a12f893e6e21e30ba13e7399a6eb0144942"
+
+[language_servers.objc-lsp]
+name = "objc-lsp"
+languages = ["Objective-C", "Objective-C++"]

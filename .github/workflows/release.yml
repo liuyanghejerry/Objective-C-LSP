@@ -123,9 +123,42 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
-  # ── Step 3: Publish to GitHub Releases ─────────────────────────────────────
+  # ── Step 3: Build Zed extension WASM ──────────────────────────────────────
+  build-zed:
+    runs-on: ubuntu-latest
+    name: Build Zed extension (WASM)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: Build Zed extension
+        working-directory: editors/zed
+        run: cargo build --release --target wasm32-wasip1
+
+      - name: Prepare extension package
+        run: |
+          mkdir -p zed-extension
+          cp editors/zed/extension.toml zed-extension/
+          cp editors/zed/LICENSE zed-extension/
+          cp -r editors/zed/languages zed-extension/
+          cp target/wasm32-wasip1/release/objc_lsp_zed.wasm zed-extension/extension.wasm
+
+      - name: Upload Zed extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-extension
+          path: zed-extension/
+          if-no-files-found: error
+          retention-days: 5
+
+  # ── Step 4: Publish to GitHub Releases ─────────────────────────────────────
   publish:
-    needs: package-vsix
+    needs: [package-vsix, build-binary, build-zed]
     runs-on: ubuntu-latest
     name: Publish Release
 
@@ -139,13 +172,43 @@ jobs:
           path: vsix-artifacts
           merge-multiple: true
 
-      - name: List VSIX files
-        run: ls -lh vsix-artifacts/
+      - name: Download raw binaries for Zed runtime download
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: binary-artifacts
+          merge-multiple: false
+
+      - name: Prepare binary release assets
+        run: |
+          mkdir -p release-binaries
+          for dir in binary-artifacts/binary-*/; do
+            platform=$(basename "$dir" | sed 's/^binary-//')
+            cp "$dir/objc-lsp" "release-binaries/objc-lsp-$platform"
+          done
+          ls -lh release-binaries/
+
+      - name: Download Zed extension
+        uses: actions/download-artifact@v4
+        with:
+          name: zed-extension
+          path: zed-extension
+
+      - name: List release files
+        run: |
+          echo '=== VSIX files ==='
+          ls -lh vsix-artifacts/
+          echo '=== Binary files ==='
+          ls -lh release-binaries/
+          echo '=== Zed extension ==='
+          ls -lh zed-extension/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: vsix-artifacts/*.vsix
+          files: |
+            vsix-artifacts/*.vsix
+            release-binaries/objc-lsp-*
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') }}
