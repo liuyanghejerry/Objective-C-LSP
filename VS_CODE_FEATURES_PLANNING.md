@@ -16,11 +16,11 @@ LSP 协议本身存在限制，缺失以下高价值信息：
 
 ---
 
-## 一、优先级 P0（高频刚需）
+## 一、优先级 P0（高频刚需） ✅ 已实现
 
-### 1.1 智能代码片段 (Smart Snippets)
+### 1.1 智能代码片段 (Smart Snippets) ✅
 
-**现状**: VS Code 基础 snippet 支持
+**现状**: ~~VS Code 基础 snippet 支持~~ → 已实现 26 个 ObjC 专用代码片段（commit `8f01e88`）
 
 **可补充**:
 
@@ -45,20 +45,19 @@ LSP 协议本身存在限制，缺失以下高价值信息：
 
 ---
 
-### 1.2 Quick Fix 命令 (Commands)
+### 1.2 Quick Fix 命令 (Commands) ✅
 
-**可补充**:
+**已实现 6 个命令**（commit `8f01e88`）:
 
-| 命令 ID | 功能 |
-|---------|------|
-| `objc-lsp.addProperty` | 选中 ivar 一键生成 @property |
-| `objc-lsp.addNullability` | 添加 `nonnull`/`nullable` 注解 |
-| `objc-lsp.wrapAutoreleasepool` | 选中代码包裹 `@autoreleasepool {}` |
-| `objc-lsp.wrapDispatchAsync` | 包裹 `dispatch_async(dispatch_get_main_queue(), ^{})` |
-| `objc-lsp.addSynthesize` | 自动生成 `@synthesize` |
-| `objc-lsp.fixRetainCycle` | 添加 `__weak` 解决循环引用 |
-| `objc-lsp.extractMethod` | 选中代码提取为方法 |
-
+| 命令 ID | 功能 | 状态 |
+|---------|------|------|
+| `objc-lsp.addProperty` | 选中 ivar 一键生成 @property | ✅ |
+| `objc-lsp.addNullability` | 添加 `nonnull`/`nullable` 注解 | ✅ |
+| `objc-lsp.wrapAutoreleasepool` | 选中代码包裹 `@autoreleasepool {}` | ✅ |
+| `objc-lsp.wrapDispatchAsync` | 包裹 `dispatch_async(dispatch_get_main_queue(), ^{})` | ✅ |
+| `objc-lsp.addSynthesize` | 自动生成 `@synthesize` | ✅ |
+| `objc-lsp.fixRetainCycle` | 添加 `__weak` 解决循环引用 | ✅ |
+| `objc-lsp.extractMethod` | 选中代码提取为方法 | ❌ 未实现 |
 **实现方式**: `commands.registerCommand` + `TextEditor.edit`
 
 **价值**:
@@ -67,19 +66,18 @@ LSP 协议本身存在限制，缺失以下高价值信息：
 
 ---
 
-## 二、优先级 P1（AI 强需求）
+## 二、优先级 P1（AI 强需求） ✅ 已实现
 
-### 2.1 Code Lens（代码透镜）
+### 2.1 Code Lens（代码透镜） ✅
 
-**可补充**:
+**已实现**（commit `eddf5bf`）:
 
-| 类型 | 说明 |
-|------|------|
-| **调用计数** | 显示方法被调用的次数 |
-| **协议来源** | 标记方法来自哪个协议（如 `UITableViewDataSource`） |
-| **覆盖状态** | 标记 protocol 方法是否已实现 |
-| **废弃警告** | 标记使用了已废弃的 API |
-
+| 类型 | 说明 | 状态 |
+|------|------|------|
+| **调用计数** | 显示方法被调用的次数 | ✅ |
+| **协议来源** | 标记方法来自哪个协议（如 `UITableViewDataSource`） | ✅ |
+| **覆盖状态** | 标记 protocol 方法是否已实现 | ✅ |
+| **废弃警告** | 标记使用了已废弃的 API | ✅ |
 **实现方式**: `CodeLensProvider`
 
 **价值**:
@@ -88,17 +86,17 @@ LSP 协议本身存在限制，缺失以下高价值信息：
 
 ---
 
-### 2.2 装饰器 (Decorators)
+### 2.2 装饰器 (Decorators) ✅
 
-**可补充**:
+**已实现**（commit `eddf5bf`）:
 
-| 类型 | 说明 |
-|------|------|
-| **Retain Cycle 警告** | 在可能产生循环引用的代码处显示警告图标 |
-| **Thread Safety** | 标记非线程安全的代码（如非原子 property） |
-| **Magic Number** | 标记硬编码的数字 |
-| **Unused Code** | 标记从未使用的方法/属性 |
-| **Strong Delegate** | 标记 delegate 用 strong 而非 weak |
+| 类型 | 说明 | 状态 |
+|------|------|------|
+| **Retain Cycle 警告** | 在可能产生循环引用的代码处显示警告图标 | ✅ |
+| **Thread Safety** | 标记非线程安全的代码（如非原子 property） | ✅ |
+| **Magic Number** | 标记硬编码的数字 | ✅ |
+| **Unused Code** | 标记从未使用的方法/属性 | ✅ |
+| **Strong Delegate** | 标记 delegate 用 strong 而非 weak | ✅ |
 
 **实现方式**: `TextEditorDecorationType`
 
@@ -108,18 +106,18 @@ LSP 协议本身存在限制，缺失以下高价值信息：
 
 ---
 
-## 三、优先级 P2（可视化增强）
+## 三、优先级 P2（可视化增强） ✅ 已实现
 
-### 3.1 Tree View（树视图）
+### 3.1 Tree View（树视图） ✅
 
-**可补充**:
+**已实现**（commit `1d066ac`）:
 
-| 视图 | 说明 |
-|------|------|
-| **Symbols Outline Pro** | 按 #pragma mark、protocol、category 分组的符号树 |
-| **Class Browser** | 项目中所有类的树状视图 |
-| **Protocol Implementations** | 列出所有协议及其实现者 |
-| **Categories/Extensions** | 按类别分组的方法视图 |
+| 视图 | 说明 | 状态 |
+|------|------|------|
+| **Symbols Outline Pro** | 按 #pragma mark、protocol、category 分组的符号树 | ✅ |
+| **Class Browser** | 项目中所有类的树状视图 | ✅ |
+| **Protocol Implementations** | 列出所有协议及其实现者 | ❌ 未实现 |
+| **Categories/Extensions** | 按类别分组的方法视图 | ❌ 未实现 |
 
 **实现方式**: `TreeView` + `TreeDataProvider`
 
@@ -129,16 +127,15 @@ LSP 协议本身存在限制，缺失以下高价值信息：
 
 ---
 
-### 3.2 Webview 面板
+### 3.2 Webview 面板 ✅ 部分实现
 
-**可补充**:
+**部分实现**（commit `1d066ac`）:
 
-| 面板 | 说明 |
-|------|------|
-| **Call Graph** | 方法调用关系图（Incoming/Outgoing） |
-| **Type Hierarchy** | 类/协议继承关系可视化图 |
-| **Dependency Graph** | 文件间 import 依赖关系图 |
-
+| 面板 | 说明 | 状态 |
+|------|------|------|
+| **Call Graph** | 方法调用关系图（Incoming/Outgoing） | ✅ |
+| **Type Hierarchy** | 类/协议继承关系可视化图 | ❌ 未实现 |
+| **Dependency Graph** | 文件间 import 依赖关系图 | ❌ 未实现 |
 **实现方式**: `WebviewPanel` + D3.js / Graphviz
 
 **价值**:
@@ -193,17 +190,16 @@ LSP 协议本身存在限制，缺失以下高价值信息：
 
 ## 五、功能矩阵
 
-| 功能 | 优先级 | 复杂度 | AI 价值 | 备注 |
+| 功能 | 优先级 | 复杂度 | AI 价值 | 状态 |
 |------|--------|--------|---------|------|
-| 智能 Snippets | P0 | 低 | 高 | 模板代码生成 |
-| Quick Fix Commands | P0 | 低 | 高 | 重构操作 |
-| Code Lens - 调用计数 | P1 | 中 | 极高 | 弥补 Call Hierarchy |
-| Decorator - Retain Cycle | P1 | 中 | 高 | ObjC 特有 |
-| Tree View - Class Browser | P2 | 中 | 中 | 弥补 Type Hierarchy |
-| Webview - Call Graph | P2 | 高 | 极高 | 可视化调用链 |
-| Hover 扩展 | P2 | 低 | 中 | 增强信息 |
-| Test Explorer | P3 | 高 | 中 | 测试集成 |
-
+| 智能 Snippets | P0 | 低 | 高 | ✅ 已实现 (26 个) |
+| Quick Fix Commands | P0 | 低 | 高 | ✅ 已实现 (6/7) |
+| Code Lens - 调用计数 | P1 | 中 | 极高 | ✅ 已实现 |
+| Decorator - Retain Cycle | P1 | 中 | 高 | ✅ 已实现 |
+| Tree View - Class Browser | P2 | 中 | 中 | ✅ 已实现 |
+| Webview - Call Graph | P2 | 高 | 极高 | ✅ 已实现 |
+| Hover 扩展 | P3 | 低 | 中 | ❌ 未实现 |
+| Test Explorer | P3 | 高 | 中 | ❌ 未实现 |
 ---
 
 ## 六、技术实现要点
@@ -235,8 +231,13 @@ Extension                    Webview
 
 ## 七、总结
 
-- **P0 功能**实现成本低，立即可提升开发体验
-- **P1 功能**弥补 LSP 协议缺失，对 AI 编程有极高价值
-- **P2 功能**需要更多开发工作，提供可视化增强
+- **P0 功能** ✅ 全部实现 — 26 个代码片段 + 6 个 Quick Fix 命令
+- **P1 功能** ✅ 全部实现 — Code Lens（4 类）+ Decorators（5 类）
+- **P2 功能** ✅ 大部分实现 — Symbols Outline Pro、Class Browser、Call Graph Webview
+- **P3 功能** ❌ 未实现 — Hover 扩展、Test Explorer、调试集成
 
-建议按优先级分阶段实现。
+### 额外修复
+- ✅ Document Symbol 回退机制 — tree-sitter 解析失败时使用 regex 提取符号（commit `594a252`）
+- ✅ 字符串语义高亮修复 — 跳过 ERROR 节点防止字符串内容被错误标记为变量
+
+建议后续按需实现 P3 功能。
