@@ -8,6 +8,7 @@ members = [
     "crates/objc-project",
     "crates/objc-store",
 ]
+exclude = ["editors/zed"]
 
 [workspace.dependencies]
 # LSP
