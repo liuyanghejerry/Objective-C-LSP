@@ -146,16 +146,17 @@ LSP 协议本身存在限制，缺失以下高价值信息：
 
 ## 四、优先级 P3（集成增强）
 
-### 4.1 Hover 扩展（扩展端实现）
+### 4.1 Hover 扩展（扩展端实现） ✅
 
-**可补充**（超越 LSP hover）:
+**已实现**（扩展端 HoverProvider，补充 LSP hover）:
 
-| 类型 | 说明 |
-|------|------|
-| **快速修复按钮** | 在 hover 中提供 Fix-it 按钮 |
-| **内联文档** | 显示 HeaderDoc 摘要 |
-| **相关方法** | 显示同类的其他相关方法 |
-| **API 版本** | 显示 API 引入/废弃的 iOS 版本 |
+| 类型 | 说明 | 状态 |
+|------|------|------|
+| **快速修复按钮** | 在 hover 中提供 Fix-it 命令链接 | ✅ |
+| **内联文档** | LSP 已提供 HeaderDoc 摘要（无需重复） | ✅ LSP 已覆盖 |
+| **相关方法** | 显示同 @implementation 中的其他方法（可点击跳转） | ✅ |
+| **API 版本** | 解析 API_AVAILABLE/NS_AVAILABLE 等宏显示平台版本 | ✅ |
+| **弃用警告** | 解析 NS_DEPRECATED/deprecated_msg 显示弃用信息 | ✅ |
 
 **实现方式**: `HoverProvider`（VS Code 扩展端，不走 LSP）
 
@@ -198,7 +199,7 @@ LSP 协议本身存在限制，缺失以下高价值信息：
 | Decorator - Retain Cycle | P1 | 中 | 高 | ✅ 已实现 |
 | Tree View - Class Browser | P2 | 中 | 中 | ✅ 已实现 |
 | Webview - Call Graph | P2 | 高 | 极高 | ✅ 已实现 |
-| Hover 扩展 | P3 | 低 | 中 | ❌ 未实现 |
+| Hover 扩展 | P3 | 低 | 中 | ✅ 已实现 |
 | Test Explorer | P3 | 高 | 中 | ❌ 未实现 |
 ---
 
@@ -234,10 +235,11 @@ Extension                    Webview
 - **P0 功能** ✅ 全部实现 — 26 个代码片段 + 6 个 Quick Fix 命令
 - **P1 功能** ✅ 全部实现 — Code Lens（4 类）+ Decorators（5 类）
 - **P2 功能** ✅ 大部分实现 — Symbols Outline Pro、Class Browser、Call Graph Webview
-- **P3 功能** ❌ 未实现 — Hover 扩展、Test Explorer、调试集成
+- **P3 功能** 🔶 部分实现 — Hover 扩展 ✅，Test Explorer ❌，调试集成 ❌
 
 ### 额外修复
 - ✅ Document Symbol 回退机制 — tree-sitter 解析失败时使用 regex 提取符号（commit `594a252`）
 - ✅ 字符串语义高亮修复 — 跳过 ERROR 节点防止字符串内容被错误标记为变量
+- ✅ Hover 扩展 — 扩展端 HoverProvider：相关方法、API 可用性、弃用警告、快速修复链接
 
 建议后续按需实现 P3 功能。
