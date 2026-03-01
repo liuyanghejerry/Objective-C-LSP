@@ -121,6 +121,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show inline decorators for retain cycles, strong delegates, and magic numbers."
+        },
+        "objc-lsp.enableHoverExtensions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show extended hover info: related methods, API availability, deprecation warnings, and quick-fix links."
         }
       }
     },
