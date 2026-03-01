@@ -1,42 +1,22 @@
 ; Objective-C auto-indentation rules for Zed
+; Based on https://github.com/Akzestia/objcpp (MIT, blacktop)
 
-; Indent after opening braces
-(compound_statement "{" @indent)
-(compound_statement "}" @outdent)
+[
+  (field_expression)
+  (assignment_expression)
+  (if_statement)
+  (for_statement)
+  (while_statement)
+  (do_statement)
+  (else_clause)
+] @indent
 
-; ObjC class/protocol/category bodies
-(class_interface "@interface" @indent)
-(class_interface "@end" @outdent)
+(_ "{" "}" @end) @indent
+(_ "(" ")" @end) @indent
 
-(class_implementation "@implementation" @indent)
-(class_implementation "@end" @outdent)
-
-(protocol_declaration "@protocol" @indent)
-(protocol_declaration "@end" @outdent)
-
-(category_interface "@interface" @indent)
-(category_interface "@end" @outdent)
-
-(category_implementation "@implementation" @indent)
-(category_implementation "@end" @outdent)
-
-; Control flow
-(if_statement ")" @indent)
-(else_clause "else" @indent)
-(while_statement ")" @indent)
-(do_statement "do" @indent)
-(for_statement ")" @indent)
-(for_in_statement ")" @indent)
-(switch_statement ")" @indent)
-
-; Case/default labels
-(case_statement ":" @indent)
-
-; @try / @catch / @finally
-(try_catch_statement "@try" @indent)
-
-; @autoreleasepool
-(autoreleasepool_statement "@autoreleasepool" @indent)
-
-; @synchronized
-(synchronized_statement ")" @indent)
+(if_statement) @start.if
+(for_statement) @start.for
+(while_statement) @start.while
+(do_statement) @start.do
+(switch_statement) @start.switch
+(else_clause) @start.else

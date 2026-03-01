@@ -1,37 +1,19 @@
 ; Objective-C tree-sitter highlights for Zed
-; Grammar: jiyee/tree-sitter-objc
+; Based on https://github.com/Akzestia/objcpp (MIT, blacktop)
+; Grammar: tree-sitter-grammars/tree-sitter-objc
 
-; ── ObjC keywords ──────────────────────────────────────────────────────────────
-
-"@interface" @keyword
-"@implementation" @keyword
-"@protocol" @keyword
-"@end" @keyword
-"@class" @keyword
-"@property" @keyword
-"@synthesize" @keyword
-"@dynamic" @keyword
-"@selector" @keyword
-"@encode" @keyword
-"@protocol" @keyword
-(optional) @keyword
-(required) @keyword
-(public) @keyword
-(private) @keyword
-(protected) @keyword
-(package) @keyword
-"@try" @keyword
-"@catch" @keyword
-"@finally" @keyword
-"@throw" @keyword
-"@synchronized" @keyword
-"@autoreleasepool" @keyword
-"@import" @keyword
-"@compatibility_alias" @keyword
-"@available" @keyword
-"@defs" @keyword
-
-; ── C keywords ─────────────────────────────────────────────────────────────────
+[
+  "const"
+  "enum"
+  "extern"
+  "inline"
+  "sizeof"
+  "static"
+  "struct"
+  "typedef"
+  "union"
+  "volatile"
+] @keyword
 
 [
   "break"
@@ -40,258 +22,27 @@
   "default"
   "do"
   "else"
-  "enum"
-  "extern"
   "for"
   "goto"
   "if"
-  "inline"
   "return"
-  "sizeof"
-  "struct"
   "switch"
-  "typedef"
-  "union"
   "while"
-] @keyword
-
-"#define" @keyword
-"#elif" @keyword
-"#else" @keyword
-"#endif" @keyword
-"#if" @keyword
-"#ifdef" @keyword
-"#ifndef" @keyword
-"#include" @keyword
-"#import" @keyword
-
-; ── Storage & type qualifiers ──────────────────────────────────────────────────
+] @keyword.control
 
 [
-  "const"
-  "static"
-  "volatile"
-  "register"
-  "restrict"
-  "extern"
-  "inline"
-  "_Atomic"
-  "__block"
-  "__weak"
-  "__strong"
-  "__unsafe_unretained"
-  "__autoreleasing"
+  "#define"
+  "#elif"
+  "#else"
+  "#endif"
+  "#if"
+  "#ifdef"
+  "#ifndef"
+  "#include"
+  (preproc_directive)
 ] @keyword
 
-; ── Types ──────────────────────────────────────────────────────────────────────
-
-(primitive_type) @type.builtin
-(type_identifier) @type
-(sized_type_specifier) @type.builtin
-
-; ObjC builtin types
-(id) @type.builtin
-(instancetype) @type.builtin
-(SEL) @type.builtin
-(IMP) @type.builtin
-(BOOL) @type.builtin
-(Class) @type.builtin
-(auto) @type.builtin
-
-; ── ObjC declarations ─────────────────────────────────────────────────────────
-
-; @interface ClassName
-(class_interface
-  name: (identifier) @type)
-
-; @implementation ClassName
-(class_implementation
-  name: (identifier) @type)
-
-; @protocol ProtocolName
-(protocol_declaration
-  name: (identifier) @type)
-
-; @interface ClassName (CategoryName)
-(category_interface
-  name: (identifier) @type
-  category: (identifier) @label)
-
-; @implementation ClassName (CategoryName)
-(category_implementation
-  name: (identifier) @type
-  category: (identifier) @label)
-
-; Superclass reference: @interface Foo : Bar
-(superclass_reference (identifier) @type)
-
-; Protocol conformance list: <NSCoding, NSCopying>
-(protocol_qualifiers (identifier) @type)
-
-; ── Methods ────────────────────────────────────────────────────────────────────
-
-; Method declaration: - (void)doSomething;
-(method_declaration
-  selector: (identifier) @function.method)
-
-; Method declaration with keyword selectors: - (void)doSomething:(int)x with:(int)y;
-(method_declaration
-  (keyword_selector
-    (keyword_declarator
-      keyword: (identifier) @function.method)))
-
-; Method definition: - (void)doSomething { ... }
-(method_definition
-  selector: (identifier) @function.method)
-
-; Method definition with keyword selectors
-(method_definition
-  (keyword_selector
-    (keyword_declarator
-      keyword: (identifier) @function.method)))
-
-; ── Properties ─────────────────────────────────────────────────────────────────
-
-(property_declaration
-  name: (identifier) @property)
-
-; Property attributes: nonatomic, strong, readonly, etc.
-(property_attributes
-  [
-    (nonatomic)
-    (atomic)
-    (strong)
-    (weak)
-    (copy)
-    (retain)
-    (assign)
-    (unsafe_unretained)
-    (readonly)
-    (readwrite)
-    (getter)
-    (setter)
-    (nullable)
-    (nonnull)
-    (null_resettable)
-    (null_unspecified)
-    (direct)
-    (class)
-  ] @attribute)
-
-; @synthesize and @dynamic
-(synthesize_definition
-  (synthesize_property
-    property: (identifier) @property))
-
-; ── Message expressions ────────────────────────────────────────────────────────
-
-; [obj method]
-(message_expression
-  selector: (identifier) @function.method)
-
-; [obj method:arg with:arg2]
-(message_expression
-  (keyword_argument
-    keyword: (identifier) @function.method))
-
-; ── @selector / @encode / @protocol expressions ───────────────────────────────
-
-(selector_expression (identifier) @function.method)
-(selector_expression
-  (keyword_argument
-    keyword: (identifier) @function.method))
-
-(encode_expression) @function.builtin
-(protocol_expression (identifier) @type)
-
-; ── C functions ────────────────────────────────────────────────────────────────
-
-(call_expression
-  function: (identifier) @function)
-
-(function_declarator
-  declarator: (identifier) @function)
-
-(function_definition
-  declarator: (function_declarator
-    declarator: (identifier) @function))
-
-; ── Strings ────────────────────────────────────────────────────────────────────
-
-(string_literal) @string
-(string_expression) @string
-(char_literal) @string
-(concatenated_string) @string
-(system_lib_string) @string
-
-(escape_sequence) @string.escape
-
-; ── Numbers ────────────────────────────────────────────────────────────────────
-
-(number_literal) @number
-(number_expression) @number
-
-; ── Boolean / nil / null / self / super ────────────────────────────────────────
-
-(YES) @constant.builtin
-(NO) @constant.builtin
-(true) @constant.builtin
-(false) @constant.builtin
-(nil) @constant.builtin
-(null) @constant.builtin
-(self) @variable.special
-(super) @variable.special
-
-; ── Identifiers ────────────────────────────────────────────────────────────────
-
-(identifier) @variable
-(field_identifier) @property
-(field_expression
-  field: (field_identifier) @property)
-(statement_identifier) @label
-
-; ── Preprocessor ───────────────────────────────────────────────────────────────
-
-(preproc_def
-  name: (identifier) @constant)
-(preproc_function_def
-  name: (identifier) @function)
-(preproc_include
-  path: (string_literal) @string)
-(preproc_include
-  path: (system_lib_string) @string)
-(preproc_import
-  path: (string_literal) @string)
-(preproc_import
-  path: (system_lib_string) @string)
-
-; ── Comments ───────────────────────────────────────────────────────────────────
-
-(comment) @comment
-
-; ── Operators ──────────────────────────────────────────────────────────────────
-
 [
-  "+"
-  "-"
-  "*"
-  "/"
-  "%"
-  "&"
-  "|"
-  "^"
-  "~"
-  "!"
-  "&&"
-  "||"
-  "<<"
-  ">>"
-  "=="
-  "!="
-  "<"
-  ">"
-  "<="
-  ">="
   "="
   "+="
   "-="
@@ -305,13 +56,298 @@
   ">>="
   "++"
   "--"
+  "+"
+  "-"
+  "*"
+  "/"
+  "%"
+  "~"
+  "&"
+  "|"
+  "^"
+  "<<"
+  ">>"
+  "!"
+  "&&"
+  "||"
+  "=="
+  "!="
+  "<"
+  ">"
+  "<="
+  ">="
   "->"
-  "."
   "?"
   ":"
 ] @operator
 
-; ── Punctuation ────────────────────────────────────────────────────────────────
+[
+  "."
+  ";"
+  ","
+] @punctuation.delimiter
 
-["(" ")" "[" "]" "{" "}"] @punctuation.bracket
-[";" "," "..."] @punctuation.delimiter
+[
+  "{"
+  "}"
+  "("
+  ")"
+  "["
+  "]"
+] @punctuation.bracket
+
+[
+  (string_literal)
+  (system_lib_string)
+  (char_literal)
+] @string
+
+(comment) @comment
+
+(number_literal) @number
+
+[
+  (true)
+  (false)
+] @boolean
+
+(null) @constant.builtin
+
+(identifier) @variable
+
+((identifier) @constant
+ (#match? @constant "^_*[A-Z][A-Z\\d_]*$"))
+
+(call_expression
+  function: (identifier) @function)
+(call_expression
+  function: (field_expression
+    field: (field_identifier) @function))
+(function_declarator
+  declarator: (identifier) @function)
+(preproc_function_def
+  name: (identifier) @function.special)
+
+(field_identifier) @property
+(statement_identifier) @label
+
+[
+  (type_identifier)
+  (primitive_type)
+  (sized_type_specifier)
+] @type
+
+; Preprocs
+
+(preproc_undef
+  name: (_) @constant) @preproc
+
+; Includes
+
+(module_import "@import" @include path: (identifier) @namespace)
+
+((preproc_include
+  _ @include path: (_))
+  (#any-of? @include "#include" "#import"))
+
+; Type Qualifiers
+
+[
+  "@optional"
+  "@required"
+  "__covariant"
+  "__contravariant"
+  (visibility_specification)
+] @type.qualifier
+
+; Storageclasses
+
+[
+  "@autoreleasepool"
+  "@synthesize"
+  "@dynamic"
+  "volatile"
+  (protocol_qualifier)
+] @keyword
+
+; Keywords
+
+[
+  "@protocol"
+  "@interface"
+  "@implementation"
+  "@compatibility_alias"
+  "@property"
+  "@selector"
+  "@defs"
+  "availability"
+  "@end"
+] @keyword
+
+(class_declaration "@" @keyword "class" @keyword) ; I hate Obj-C for allowing "@ class" :)
+
+(method_definition ["+" "-"] @keyword.function)
+(method_declaration ["+" "-"] @keyword.function)
+
+[
+  "__typeof__"
+  "__typeof"
+  "typeof"
+  "in"
+] @keyword.operator
+
+[
+  "@synchronized"
+  "oneway"
+] @keyword.coroutine
+
+; Exceptions
+
+[
+  "@try"
+  "__try"
+  "@catch"
+  "__catch"
+  "@finally"
+  "__finally"
+  "@throw"
+] @exception
+
+; Variables
+
+((identifier) @variable.builtin
+  (#any-of? @variable.builtin "self" "super"))
+
+; Functions & Methods
+
+[
+  "objc_bridge_related"
+  "@available"
+  "__builtin_available"
+  "va_arg"
+  "asm"
+] @function.builtin
+
+(method_definition (identifier) @method)
+
+(method_declaration (identifier) @method)
+
+(method_identifier (identifier)? @method ":" @method (identifier)? @method)
+
+(message_expression method: (identifier) @method.call)
+
+; Constructors
+
+((message_expression method: (identifier) @constructor)
+  (#eq? @constructor "init"))
+
+; Attributes
+
+(availability_attribute_specifier
+  [
+    "CF_FORMAT_FUNCTION" "NS_AVAILABLE" "__IOS_AVAILABLE" "NS_AVAILABLE_IOS"
+    "API_AVAILABLE" "API_UNAVAILABLE" "API_DEPRECATED" "NS_ENUM_AVAILABLE_IOS"
+    "NS_DEPRECATED_IOS" "NS_ENUM_DEPRECATED_IOS" "NS_FORMAT_FUNCTION" "DEPRECATED_MSG_ATTRIBUTE"
+    "__deprecated_msg" "__deprecated_enum_msg" "NS_SWIFT_NAME" "NS_SWIFT_UNAVAILABLE"
+    "NS_EXTENSION_UNAVAILABLE_IOS" "NS_CLASS_AVAILABLE_IOS" "NS_CLASS_DEPRECATED_IOS" "__OSX_AVAILABLE_STARTING"
+    "NS_ROOT_CLASS" "NS_UNAVAILABLE" "NS_REQUIRES_NIL_TERMINATION" "CF_RETURNS_RETAINED"
+    "CF_RETURNS_NOT_RETAINED" "DEPRECATED_ATTRIBUTE" "UI_APPEARANCE_SELECTOR" "UNAVAILABLE_ATTRIBUTE"
+  ]) @attribute
+
+; Macros
+
+(type_qualifier
+  [
+    "_Complex"
+    "_Nonnull"
+    "_Nullable"
+    "_Nullable_result"
+    "_Null_unspecified"
+    "__autoreleasing"
+    "__block"
+    "__bridge"
+    "__bridge_retained"
+    "__bridge_transfer"
+    "__complex"
+    "__kindof"
+    "__nonnull"
+    "__nullable"
+    "__ptrauth_objc_class_ro"
+    "__ptrauth_objc_isa_pointer"
+    "__ptrauth_objc_super_pointer"
+    "__strong"
+    "__thread"
+    "__unsafe_unretained"
+    "__unused"
+    "__weak"
+  ]) @function.macro.builtin
+
+[ "__real" "__imag" ] @function.macro.builtin
+
+((call_expression function: (identifier) @function.macro)
+  (#eq? @function.macro "testassert"))
+
+; Types
+
+(class_declaration (identifier) @type)
+
+(class_interface "@interface" . (identifier) @type superclass: _? @type category: _? @namespace)
+
+(class_implementation "@implementation" . (identifier) @type superclass: _? @type category: _? @namespace)
+
+(protocol_forward_declaration (identifier) @type) ; @interface :(
+
+(protocol_reference_list (identifier) @type) ; ^
+
+[
+  "BOOL"
+  "IMP"
+  "SEL"
+  "Class"
+  "id"
+] @type.builtin
+
+; Constants
+
+(property_attribute (identifier) @constant "="?)
+
+[ "__asm" "__asm__" ] @constant.macro
+
+; Properties
+
+(property_implementation "@synthesize" (identifier) @property)
+
+((identifier) @property
+  (#has-ancestor? @property struct_declaration))
+
+; Parameters
+
+(method_parameter ":" @method (identifier) @parameter)
+
+(method_parameter declarator: (identifier) @parameter)
+
+(parameter_declaration
+  declarator: (function_declarator
+                declarator: (parenthesized_declarator
+                              (block_pointer_declarator
+                                declarator: (identifier) @parameter))))
+
+"..." @parameter.builtin
+
+; Operators
+
+[
+  "^"
+] @operator
+
+; Literals
+
+(platform) @string.special
+
+(version_number) @text.uri @number
+
+; Punctuation
+
+"@" @punctuation.special
+
+[ "<" ">" ] @punctuation.bracket
