@@ -6,6 +6,8 @@ Existing tools (clangd, ccls, sourcekit-lsp) treat Objective-C as an afterthough
 
 ## Why Not clangd?
 
+I found current solutions are not really handy when working with Objective-C.
+
 | Problem | clangd Issue | objc-lsp |
 |---------|-------------|----------|
 | `.h` files misidentified as C, not ObjC | [#621](https://github.com/clangd/clangd/issues/621) (open since 2020) | ✅ Content heuristic detects `@interface`/`@implementation` |
@@ -13,6 +15,8 @@ Existing tools (clangd, ccls, sourcekit-lsp) treat Objective-C as an afterthough
 | `@property` rename doesn't coordinate getter/setter/ivar | [llvm#81775](https://github.com/llvm/llvm-project/issues/81775) (open since 2024) | ✅ Coordinated rename across getter, setter, backing ivar, and dot syntax |
 | sourcekit-lsp just spawns clangd for ObjC | — | ✅ Native ObjC implementation, no delegation |
 | Requires `compile_commands.json` | — | ✅ Parses `.xcodeproj` directly, works out of the box |
+
+Furthermore, VS Code extensions provide additional user-friendly features that go beyond what LSP can offer—features that clangd alone cannot achieve.
 
 ## Features
 
