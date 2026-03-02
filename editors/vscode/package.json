@@ -2,7 +2,7 @@
   "name": "objc-lsp",
   "displayName": "Objective-C Language Server",
   "description": "First-class Objective-C language support via objc-lsp (completion, hover, diagnostics, rename, and more)",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "publisher": "liuyanghejerry",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -59,14 +59,25 @@
     "languages": [
       {
         "id": "objective-c",
-        "aliases": ["Objective-C", "objc"],
-        "extensions": [".m", ".h"],
+        "aliases": [
+          "Objective-C",
+          "objc"
+        ],
+        "extensions": [
+          ".m",
+          ".h"
+        ],
         "configuration": "./language-configuration.json"
       },
       {
         "id": "objective-cpp",
-        "aliases": ["Objective-C++", "objcpp"],
-        "extensions": [".mm"],
+        "aliases": [
+          "Objective-C++",
+          "objcpp"
+        ],
+        "extensions": [
+          ".mm"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -92,13 +103,20 @@
         },
         "objc-lsp.logLevel": {
           "type": "string",
-          "enum": ["error", "warn", "info", "debug"],
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug"
+          ],
           "default": "info",
           "description": "Log verbosity of the objc-lsp server process."
         },
         "objc-lsp.extraCompilerFlags": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "markdownDescription": "Extra flags passed to clang for every translation unit, e.g. `[\"-DDEBUG\", \"-I/usr/local/include\"]`."
         },
