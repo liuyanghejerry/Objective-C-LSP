@@ -185,6 +185,7 @@ impl Server {
     // -----------------------------------------------------------------------
 
     fn handle_request(&mut self, req: Request) -> Result<()> {
+        tracing::info!("handle_request: method={:?}", req.method);
         match req.method.as_str() {
             DocumentSymbolRequest::METHOD => self.on_document_symbol(req)?,
             HoverRequest::METHOD => self.on_hover(req)?,

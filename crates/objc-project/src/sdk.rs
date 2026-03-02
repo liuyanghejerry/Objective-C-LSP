@@ -224,10 +224,47 @@ pub fn workspace_include_flags(workspace_root: Option<&std::path::Path>) -> Vec<
             };
             flags.push("-include".to_owned());
             flags.push(include_path.to_string_lossy().into_owned());
+        } else if is_ios {
+            // No project prefix header found. Synthesise a minimal one that
+            // imports the iOS UIKit umbrella so that SDK types like UIBezierPath,
+            // UIColor, etc. are visible to libclang. Without this, libclang
+            // cannot resolve any UIKit symbol and goto-definition returns nothing.
+            // NOTE: -fmodules is intentionally NOT used (see find_ios_simulator_sdk
+            // comment) so we must pull in headers via a plain #import chain.
+            if let Some(synth) = write_synthetic_uikit_header() {
+                flags.push("-include".to_owned());
+                flags.push(synth.to_string_lossy().into_owned());
+            }
         }
     }
 
     flags
+}
+
+/// Write a minimal synthetic UIKit umbrella header to a temp file and return its path.
+///
+/// Used as a fallback when no project prefix header (`*.pch`) is found for an iOS
+/// workspace. This ensures libclang can resolve SDK types like `UIBezierPath` without
+/// relying on `-fmodules` (which causes `clang_getSpellingLocation` to return a null
+/// `CXFile` for module-cache entries, breaking goto-definition).
+#[cfg(target_os = "macos")]
+fn write_synthetic_uikit_header() -> Option<std::path::PathBuf> {
+    let dest = std::env::temp_dir()
+        .join("objc-lsp-headers")
+        .join("synthetic_uikit_prefix.h");
+    let _ = std::fs::create_dir_all(dest.parent().unwrap());
+    // Only (re-)write if the file doesn't already exist — it's stable content.
+    if !dest.exists() {
+        let content = concat!(
+            "#ifndef OBJC_LSP_SYNTHETIC_UIKIT_PREFIX_H\n",
+            "#define OBJC_LSP_SYNTHETIC_UIKIT_PREFIX_H\n",
+            "#import <UIKit/UIKit.h>\n",
+            "#import <Foundation/Foundation.h>\n",
+            "#endif\n",
+        );
+        std::fs::write(&dest, content).ok()?;
+    }
+    Some(dest)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -305,11 +342,14 @@ pub fn find_ios_simulator_sdk() -> Option<SdkInfo> {
             // iOS simulator arch
             "-arch".to_owned(),
             "arm64".to_owned(),
-            // Enable Clang modules so @import UIKit (used directly in project .h files)
-            // resolves correctly. Note: -fmodule-cache-path is NOT passed — that flag
-            // is an invalid clang driver argument that causes CXError_ASTReadError (err=4).
-            // -fmodules alone (with the default cache location) works correctly.
-            "-fmodules".to_owned(),
+            // Do NOT pass -fmodules: when Clang module caches (PCM) are used,
+            // clang_getSpellingLocation() returns a null CXFile for SDK symbols
+            // (the location lives inside a binary PCM, not a physical .h file),
+            // which makes goto-definition silently return nothing for any Apple
+            // framework type (UIBezierPath, UIColor, etc.).
+            // Instead we rely on the -include <prefix.h> path injected below
+            // (workspace_include_flags → find_prefix_header) which pulls in UIKit
+            // via a normal #import chain so physical header paths are preserved.
             // Suppress warnings about non-portable Apple-specific pragmas
             "-Wno-unknown-pragmas".to_owned(),
             "-Wno-error".to_owned(),
