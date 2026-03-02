@@ -86,7 +86,13 @@ impl IndexStore {
              ON CONFLICT(path) DO UPDATE SET mtime = excluded.mtime",
             rusqlite::params![path, mtime],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        // last_insert_rowid() is unreliable with ON CONFLICT, query explicitly
+        let file_id: i64 = self.conn.query_row(
+            "SELECT id FROM files WHERE path = ?1",
+            [path],
+            |row| row.get(0),
+        )?;
+        Ok(file_id)
     }
 }
 
