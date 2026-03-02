@@ -761,5 +761,37 @@ mod tests {
             "expected fallback -I <synth-dir> with MyPod/Foo.h when no Pods dir: {flags:?}"
         );
     }
+
+    #[test]
+    #[ignore = "requires /tmp/iOS-Component-Pro to be cloned first"]
+    fn cocoapods_flags_with_real_pods_dir() {
+        // Use the cloned iOS-Component-Pro project which has a committed Pods/
+        // This is an integration test — only runs when the project is present.
+        let root = std::path::Path::new("/tmp/iOS-Component-Pro");
+        if !root.join("Pods").exists() {
+            eprintln!("SKIP: /tmp/iOS-Component-Pro not present");
+            return;
+        }
+        let flags = cocoapods_flags(root);
+        eprintln!("cocoapods_flags ({} flags):", flags.len());
+        for pair in flags.windows(2) {
+            if pair[0] == "-I" {
+                eprintln!("  -I {}", pair[1]);
+            }
+        }
+        // Should have at least -I pointing at Pods/Headers/Public
+        let public_root = root.join("Pods").join("Headers").join("Public");
+        let has_public_root = flags.windows(2).any(|w| {
+            w[0] == "-I" && std::path::Path::new(&w[1]) == public_root
+        });
+        assert!(has_public_root, "expected -I Pods/Headers/Public in flags: {flags:?}");
+        // Should resolve <EleInvoiceCategory/CTMediator+Elelnvoice.h>
+        let header_path = public_root.join("EleInvoiceCategory").join("CTMediator+Elelnvoice.h");
+        assert!(header_path.exists(), "header should exist: {header_path:?}");
+        let has_ele_dir = flags.windows(2).any(|w| {
+            w[0] == "-I" && std::path::Path::new(&w[1]) == public_root.join("EleInvoiceCategory")
+        });
+        assert!(has_ele_dir, "expected -I for EleInvoiceCategory subdir: {flags:?}");
+    }
 }
 
