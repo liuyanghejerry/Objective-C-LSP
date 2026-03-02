@@ -273,4 +273,6 @@ Open Zed → Extensions → Install Dev Extension → select editors/zed
 
 ## License
 
-[MIT](editors/vscode/package.json)
+* VS Code extension is free for personal and commercial use. Check editors/vscode/LICENSE for details.
+* Zed extension is distributed under the MIT License.
+* Objective-C LSP server is closed-source, for now.
