@@ -40,9 +40,97 @@ impl ClangIndex {
                 return Ok(None);
             }
 
+            let raw_kind = unsafe { clang_getCursorKind(cursor) };
             let decl_cursor = unsafe { clang_getCursorReferenced(cursor) };
             let resolved = if unsafe { clang_Cursor_isNull(decl_cursor) } == 0 {
                 decl_cursor
+            } else if raw_kind == 231 {
+                // Strategy-3: walk descendants for ObjCMessageExpr.
+                if let Some(method_cursor) = find_msg_expr_ref(tu, cursor, location) {
+                    method_cursor
+                } else {
+                    // Strategy-4: pure token scan when AST is broken by undefined macros.
+                    let tgt_line = pos.line + 1;
+                    let tgt_col  = pos.character + 1;
+                    if let Some(mc) = find_method_by_token_scan(tu, file, tgt_line, tgt_col) {
+                        mc
+                    } else {
+                        // Strategy-5: whole-file annotated-token twin search.
+                        // For C functions / macros on broken-AST lines, find
+                        // the same identifier on a different (intact) line and
+                        // borrow its resolved cursor for hover information.
+                        let s5_result = (|| -> Option<CXCursor> {
+                            // Determine the spelling of the clicked token.
+                            let range = unsafe {
+                                let start = clang_getLocation(tu, file, tgt_line, 1);
+                                let end   = clang_getLocation(tu, file, tgt_line, 512);
+                                clang_getRange(start, end)
+                            };
+                            if unsafe { clang_Range_isNull(range) } != 0 { return None; }
+                            let mut lp: *mut CXToken = std::ptr::null_mut();
+                            let mut lc: u32 = 0;
+                            unsafe { clang_tokenize(tu, range, &mut lp, &mut lc); }
+                            if lp.is_null() || lc == 0 { return None; }
+                            struct LGuard(*mut CXToken, u32, CXTranslationUnit);
+                            impl Drop for LGuard {
+                                fn drop(&mut self) { unsafe { clang_disposeTokens(self.2, self.0, self.1) }; }
+                            }
+                            let _lg = LGuard(lp, lc, tu);
+                            let ltoks = unsafe { std::slice::from_raw_parts(lp, lc as usize) };
+                            // Find the token under the cursor (Identifier kind=2).
+                            let target_spelling = ltoks.iter().find_map(|&tok| {
+                                if unsafe { clang_getTokenKind(tok) } != 2 { return None; }
+                                let ext = unsafe { clang_getTokenExtent(tu, tok) };
+                                let mut sf: CXFile = std::ptr::null_mut();
+                                let mut sl: u32 = 0; let mut sc: u32 = 0;
+                                let mut ef: CXFile = std::ptr::null_mut();
+                                let mut el: u32 = 0; let mut ec: u32 = 0;
+                                unsafe {
+                                    clang_getSpellingLocation(clang_getRangeStart(ext), &mut sf, &mut sl, &mut sc, std::ptr::null_mut());
+                                    clang_getSpellingLocation(clang_getRangeEnd(ext), &mut ef, &mut el, &mut ec, std::ptr::null_mut());
+                                }
+                                if sf.is_null() || sf != file || sl != tgt_line { return None; }
+                                if !(sc <= tgt_col && tgt_col <= ec) { return None; }
+                                let sp = cx_string_owned(unsafe { clang_getTokenSpelling(tu, tok) });
+                                if sp.is_empty() { None } else { Some(sp) }
+                            })?;
+                            // Tokenize whole file and look for a twin on another line.
+                            let frange = unsafe {
+                                let fstart = clang_getLocation(tu, file, 1, 1);
+                                let fend   = clang_getLocation(tu, file, u32::MAX / 2, 1);
+                                clang_getRange(fstart, fend)
+                            };
+                            if unsafe { clang_Range_isNull(frange) } != 0 { return None; }
+                            let mut fp: *mut CXToken = std::ptr::null_mut();
+                            let mut fc: u32 = 0;
+                            unsafe { clang_tokenize(tu, frange, &mut fp, &mut fc); }
+                            if fp.is_null() || fc == 0 { return None; }
+                            struct FGuard(*mut CXToken, u32, CXTranslationUnit);
+                            impl Drop for FGuard {
+                                fn drop(&mut self) { unsafe { clang_disposeTokens(self.2, self.0, self.1) }; }
+                            }
+                            let _fg = FGuard(fp, fc, tu);
+                            let ftoks = unsafe { std::slice::from_raw_parts(fp, fc as usize) };
+                            let mut fann: Vec<CXCursor> = vec![unsafe { std::mem::zeroed() }; fc as usize];
+                            unsafe { clang_annotateTokens(tu, fp, fc, fann.as_mut_ptr()); }
+                            for (&tok, &ann_cur) in ftoks.iter().zip(fann.iter()) {
+                                if unsafe { clang_getTokenKind(tok) } != 2 { continue; }
+                                let sp = cx_string_owned(unsafe { clang_getTokenSpelling(tu, tok) });
+                                if sp != target_spelling { continue; }
+                                let tok_loc = unsafe { clang_getTokenLocation(tu, tok) };
+                                let mut tok_file: CXFile = std::ptr::null_mut();
+                                let mut tok_line: u32 = 0;
+                                unsafe { clang_getSpellingLocation(tok_loc, &mut tok_file, &mut tok_line, std::ptr::null_mut(), std::ptr::null_mut()); }
+                                if tok_line == tgt_line { continue; }
+                                let ref_c = unsafe { clang_getCursorReferenced(ann_cur) };
+                                if unsafe { clang_Cursor_isNull(ref_c) } != 0 { continue; }
+                                return Some(ref_c);
+                            }
+                            None
+                        })();
+                        s5_result.unwrap_or(cursor)
+                    }
+                }
             } else {
                 cursor
             };
@@ -57,8 +145,23 @@ impl ClangIndex {
             }
             // Preprocessor cursors: MacroExpansion=103, MacroDefinition=102, InclusionDirective=104
             // MacroExpansion cursors for undefined macros can SIGSEGV inside clang_getCursorDisplayName.
+            // For MacroExpansion (kind=103) of undefined macros, show a "no definition" hover
+            // so the user knows the symbol exists but can't be resolved.
             let is_preprocessor = kind >= 100 && kind <= 110;
             if is_preprocessor {
+                if kind == 103 {
+                    // MacroExpansion — try to show the macro name.
+                    let spelling = token_spelling_at(tu, file, pos.line + 1, pos.character + 1);
+                    if let Some(name) = spelling {
+                        return Ok(Some(Hover {
+                            contents: HoverContents::Markup(MarkupContent {
+                                kind: MarkupKind::Markdown,
+                                value: format!("`{name}` — macro (no definition found)"),
+                            }),
+                            range: None,
+                        }));
+                    }
+                }
                 return Ok(None);
             }
             // Suppress hover when clang_getCursor returned a container-body cursor
@@ -70,7 +173,7 @@ impl ClangIndex {
             // We do NOT suppress when getCursorReferenced resolved to a different,
             // concrete symbol (e.g. hovering a method call inside the body gives a
             // ObjCInstanceMethodDecl reference — that's useful and should be shown).
-            let raw_kind = unsafe { clang_getCursorKind(cursor) };
+            // raw_kind already computed above.
             let is_raw_container = matches!(
                 raw_kind,
                 CXCursor_ObjCImplementationDecl
@@ -84,6 +187,23 @@ impl ClangIndex {
                     | CXCursor_TranslationUnit
             );
             if is_raw_container && resolved_is_same_container {
+                return Ok(None);
+            }
+
+            // If all strategies failed and resolved is still a DeclStmt (231),
+            // we couldn't identify the specific symbol. Try to show the token
+            // spelling with a "no definition found" message rather than garbage.
+            if kind == 231 {
+                let spelling = token_spelling_at(tu, file, pos.line + 1, pos.character + 1);
+                if let Some(name) = spelling {
+                    return Ok(Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: format!("`{name}` — no definition found"),
+                        }),
+                        range: None,
+                    }));
+                }
                 return Ok(None);
             }
 
@@ -170,6 +290,279 @@ impl ClangIndex {
             }))
         })
     }
+}
+
+
+// ---------------------------------------------------------------------------
+// ObjCMessageExpr descendant walk for selector hover
+// ---------------------------------------------------------------------------
+
+/// Walk all descendants of `container` to find the first `ObjCMessageExpr`
+/// (kind=233) whose source extent contains `location`. Returns the cursor
+/// obtained by calling `clang_getCursorReferenced()` on the message expression
+/// (i.e. the called method's ObjCClassMethodDecl / ObjCInstanceMethodDecl).
+///
+/// This handles the case where `clang_getCursor()` returns a coarse `DeclStmt`
+/// for every column of a declaration line whose initializer is a message send.
+fn find_msg_expr_ref(
+    tu: CXTranslationUnit,
+    container: CXCursor,
+    location: CXSourceLocation,
+) -> Option<CXCursor> {
+    struct Ctx {
+        target: CXSourceLocation,
+        result: Option<CXCursor>,
+    }
+
+    extern "C" fn visitor(
+        cursor: CXCursor,
+        _parent: CXCursor,
+        data: CXClientData,
+    ) -> CXChildVisitResult {
+        let ctx = unsafe { &mut *(data as *mut Ctx) };
+        if ctx.result.is_some() {
+            return CXChildVisit_Break;
+        }
+        let kind = unsafe { clang_getCursorKind(cursor) };
+        // ObjCMessageExpr = 233
+        if kind == 233 {
+            // Check if this message send's extent contains the target position.
+            let extent = unsafe { clang_getCursorExtent(cursor) };
+            if unsafe { clang_Range_isNull(extent) } != 0 {
+                return CXChildVisit_Recurse;
+            }
+            let mut sf: CXFile = std::ptr::null_mut();
+            let mut sl: u32 = 0;
+            let mut sc: u32 = 0;
+            let mut el: u32 = 0;
+            let mut ec: u32 = 0;
+            let mut ef: CXFile = std::ptr::null_mut();
+            unsafe {
+                clang_getSpellingLocation(
+                    clang_getRangeStart(extent),
+                    &mut sf, &mut sl, &mut sc,
+                    std::ptr::null_mut(),
+                );
+                clang_getSpellingLocation(
+                    clang_getRangeEnd(extent),
+                    &mut ef, &mut el, &mut ec,
+                    std::ptr::null_mut(),
+                );
+            }
+            let mut tf: CXFile = std::ptr::null_mut();
+            let mut tl: u32 = 0;
+            let mut tc: u32 = 0;
+            unsafe {
+                clang_getSpellingLocation(
+                    ctx.target,
+                    &mut tf, &mut tl, &mut tc,
+                    std::ptr::null_mut(),
+                );
+            }
+            if !sf.is_null() && !tf.is_null() && sf == tf {
+                let in_range = (tl, tc) >= (sl, sc) && (tl, tc) <= (el, ec);
+                if in_range {
+                    let ref_c = unsafe { clang_getCursorReferenced(cursor) };
+                    if unsafe { clang_Cursor_isNull(ref_c) } == 0 {
+                        ctx.result = Some(ref_c);
+                        return CXChildVisit_Break;
+                    }
+                }
+            }
+            return CXChildVisit_Recurse;
+        }
+        CXChildVisit_Recurse
+    }
+
+    let mut ctx = Ctx {
+        target: location,
+        result: None,
+    };
+    unsafe {
+        clang_visitChildren(
+            container,
+            visitor,
+            &mut ctx as *mut Ctx as CXClientData,
+        );
+    }
+    ctx.result
+}
+
+/// Strategy-4 fallback: pure token-based receiver-class method lookup.
+///
+/// When libclang cannot parse the ObjC message send (e.g. undefined macros
+/// in argument list), walk the token stream to find the enclosing `[` bracket,
+/// identify the receiver class, resolve its ObjCInterfaceDecl, and return the
+/// first method whose selector starts with the clicked identifier's spelling.
+///
+/// Returns the method cursor (ObjCClassMethodDecl / ObjCInstanceMethodDecl)
+/// on success, or `None` if the clicked position is not a selector token.
+fn find_method_by_token_scan(
+    tu: CXTranslationUnit,
+    tgt_file: CXFile,
+    tgt_line: u32,
+    tgt_col: u32,
+) -> Option<CXCursor> {
+    // Tokenise the whole TU range around the target line.
+    let range = unsafe {
+        let start = clang_getLocation(tu, tgt_file, tgt_line, 1);
+        let end   = clang_getLocation(tu, tgt_file, tgt_line, 512);
+        clang_getRange(start, end)
+    };
+    if unsafe { clang_Range_isNull(range) } != 0 {
+        return None;
+    }
+    let mut tokens_ptr: *mut CXToken = std::ptr::null_mut();
+    let mut token_count: u32 = 0;
+    unsafe { clang_tokenize(tu, range, &mut tokens_ptr, &mut token_count); }
+    if tokens_ptr.is_null() || token_count == 0 {
+        return None;
+    }
+    let token_slice = unsafe { std::slice::from_raw_parts(tokens_ptr, token_count as usize) };
+
+    // Annotate tokens so we can look up cursors for each.
+    let mut ann_cursors: Vec<CXCursor> = vec![unsafe { clang_getNullCursor() }; token_count as usize];
+    unsafe { clang_annotateTokens(tu, tokens_ptr, token_count, ann_cursors.as_mut_ptr()); }
+
+    // Helper to extract spelling of a token.
+    let tok_spelling = |tok: CXToken| -> String {
+        cx_string_owned(unsafe { clang_getTokenSpelling(tu, tok) })
+    };
+
+    // Find the token under the cursor (must be an Identifier, kind=2).
+    let mut clicked_idx: Option<usize> = None;
+    let mut target_spelling = String::new();
+    for (i, &tok) in token_slice.iter().enumerate() {
+        let ext = unsafe { clang_getTokenExtent(tu, tok) };
+        let mut sf: CXFile = std::ptr::null_mut();
+        let mut sl: u32 = 0; let mut sc: u32 = 0;
+        let mut ef: CXFile = std::ptr::null_mut();
+        let mut el: u32 = 0; let mut ec: u32 = 0;
+        unsafe {
+            clang_getSpellingLocation(clang_getRangeStart(ext), &mut sf, &mut sl, &mut sc, std::ptr::null_mut());
+            clang_getSpellingLocation(clang_getRangeEnd(ext), &mut ef, &mut el, &mut ec, std::ptr::null_mut());
+        }
+        if sf.is_null() || sf != tgt_file { continue; }
+        if sl != tgt_line { continue; }
+        if !(sc <= tgt_col && tgt_col <= ec) { continue; }
+        // Must be an identifier.
+        if unsafe { clang_getTokenKind(tok) } != 2 { continue; }
+        target_spelling = tok_spelling(tok);
+        if !target_spelling.is_empty() {
+            clicked_idx = Some(i);
+            break;
+        }
+    }
+
+    let idx = match clicked_idx {
+        Some(i) => i,
+        None => {
+            unsafe { clang_disposeTokens(tu, tokens_ptr, token_count); }
+            return None;
+        }
+    };
+
+    // Scan backward from idx to find the enclosing '[' bracket.
+    let mut bracket_idx: Option<usize> = None;
+    let mut depth: i32 = 0;
+    for i in (0..idx).rev() {
+        let tok = token_slice[i];
+        let sp = tok_spelling(tok);
+        if unsafe { clang_getTokenKind(tok) } == 0 {
+            if sp == "]" { depth += 1; }
+            else if sp == "[" {
+                if depth == 0 { bracket_idx = Some(i); break; }
+                depth -= 1;
+            }
+        }
+    }
+
+    let bi = match bracket_idx {
+        Some(b) => b,
+        None => {
+            unsafe { clang_disposeTokens(tu, tokens_ptr, token_count); }
+            return None;
+        }
+    };
+
+    // ── Paren-depth guard ────────────────────────────────────────────────
+    // If the clicked token sits inside parentheses (e.g. a C function argument
+    // like CGRectMake(...)), it is not in selector position → skip strategy4.
+    let paren_depth: i32 = token_slice[bi..idx].iter().fold(0i32, |d, &tok| {
+        if unsafe { clang_getTokenKind(tok) } == 0 {
+            let sp = cx_string_owned(unsafe { clang_getTokenSpelling(tu, tok) });
+            if sp == "(" { d + 1 } else if sp == ")" { d - 1 } else { d }
+        } else { d }
+    });
+    if paren_depth > 0 {
+        unsafe { clang_disposeTokens(tu, tokens_ptr, token_count); }
+        return None;
+    }
+
+    // First Identifier token after '[' is the receiver class.
+    let ri = (bi + 1..token_slice.len()).find(|&j| {
+        (unsafe { clang_getTokenKind(token_slice[j]) }) == 2
+    });
+    let ri = match ri {
+        Some(r) => r,
+        None => {
+            unsafe { clang_disposeTokens(tu, tokens_ptr, token_count); }
+            return None;
+        }
+    };
+
+    let recv_spelling = tok_spelling(token_slice[ri]);
+    if recv_spelling.is_empty() {
+        unsafe { clang_disposeTokens(tu, tokens_ptr, token_count); }
+        return None;
+    }
+
+    // Find an annotated token with the receiver spelling that resolves to
+    // an ObjCInterfaceDecl (11) or ObjCClassRef (42).
+    let mut iface_cursor: Option<CXCursor> = None;
+    for (&tok, &ann_cur) in token_slice.iter().zip(ann_cursors.iter()) {
+        if (unsafe { clang_getTokenKind(tok) }) != 2 { continue; }
+        if tok_spelling(tok) != recv_spelling { continue; }
+        let ref_c = unsafe { clang_getCursorReferenced(ann_cur) };
+        if unsafe { clang_Cursor_isNull(ref_c) } != 0 { continue; }
+        let ref_kind = unsafe { clang_getCursorKind(ref_c) };
+        if ref_kind == 11 || ref_kind == 42 {
+            let def_c = unsafe { clang_getCursorDefinition(ref_c) };
+            iface_cursor = Some(if unsafe { clang_Cursor_isNull(def_c) } == 0 { def_c } else { ref_c });
+            break;
+        }
+    }
+
+    let iface = match iface_cursor {
+        Some(c) => c,
+        None => {
+            unsafe { clang_disposeTokens(tu, tokens_ptr, token_count); }
+            return None;
+        }
+    };
+
+    // Walk the ObjCInterfaceDecl children for a method matching the selector prefix.
+    struct MethodCtx { selector_prefix: String, found: Option<CXCursor> }
+    extern "C" fn method_visitor(
+        cursor: CXCursor, _parent: CXCursor, data: CXClientData,
+    ) -> CXChildVisitResult {
+        let ctx = unsafe { &mut *(data as *mut MethodCtx) };
+        let kind = unsafe { clang_getCursorKind(cursor) };
+        // ObjCInstanceMethodDecl=16, ObjCClassMethodDecl=17
+        if kind == 16 || kind == 17 {
+            let sp = cx_string_owned(unsafe { clang_getCursorSpelling(cursor) });
+            if sp.starts_with(ctx.selector_prefix.as_str()) {
+                ctx.found = Some(cursor);
+                return CXChildVisit_Break;
+            }
+        }
+        CXChildVisit_Continue
+    }
+    let mut mctx = MethodCtx { selector_prefix: target_spelling, found: None };
+    unsafe { clang_visitChildren(iface, method_visitor, &mut mctx as *mut MethodCtx as CXClientData); }
+
+    unsafe { clang_disposeTokens(tu, tokens_ptr, token_count); }
+    mctx.found
 }
 
 // ---------------------------------------------------------------------------
@@ -545,6 +938,47 @@ fn cursor_kind_label(kind: CXCursorKind) -> &'static str {
     }
 }
 
+/// Extract the spelling of the identifier token at `(line, col)` (1-based).
+/// Returns `None` if no identifier token covers that position.
+fn token_spelling_at(
+    tu: CXTranslationUnit,
+    file: CXFile,
+    line: u32,
+    col: u32,
+) -> Option<String> {
+    let range = unsafe {
+        let start = clang_getLocation(tu, file, line, 1);
+        let end   = clang_getLocation(tu, file, line, 512);
+        clang_getRange(start, end)
+    };
+    if unsafe { clang_Range_isNull(range) } != 0 { return None; }
+    let mut tp: *mut CXToken = std::ptr::null_mut();
+    let mut tc: u32 = 0;
+    unsafe { clang_tokenize(tu, range, &mut tp, &mut tc); }
+    if tp.is_null() || tc == 0 { return None; }
+    struct Guard(*mut CXToken, u32, CXTranslationUnit);
+    impl Drop for Guard {
+        fn drop(&mut self) { unsafe { clang_disposeTokens(self.2, self.0, self.1) }; }
+    }
+    let _g = Guard(tp, tc, tu);
+    let toks = unsafe { std::slice::from_raw_parts(tp, tc as usize) };
+    toks.iter().find_map(|&tok| {
+        if unsafe { clang_getTokenKind(tok) } != 2 { return None; } // must be Identifier
+        let ext = unsafe { clang_getTokenExtent(tu, tok) };
+        let mut sf: CXFile = std::ptr::null_mut();
+        let mut sl: u32 = 0; let mut sc: u32 = 0;
+        let mut ef: CXFile = std::ptr::null_mut();
+        let mut _el: u32 = 0; let mut ec: u32 = 0;
+        unsafe {
+            clang_getSpellingLocation(clang_getRangeStart(ext), &mut sf, &mut sl, &mut sc, std::ptr::null_mut());
+            clang_getSpellingLocation(clang_getRangeEnd(ext), &mut ef, &mut _el, &mut ec, std::ptr::null_mut());
+        }
+        if sf.is_null() || sf != file || sl != line { return None; }
+        if !(sc <= col && col <= ec) { return None; }
+        let sp = cx_string_owned(unsafe { clang_getTokenSpelling(tu, tok) });
+        if sp.is_empty() { None } else { Some(sp) }
+    })
+}
 fn path_to_cstr(path: &Path) -> std::ffi::CString {
     std::ffi::CString::new(path.to_string_lossy().as_ref())
         .expect("path must not contain null bytes")
