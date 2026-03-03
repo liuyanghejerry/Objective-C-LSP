@@ -26,7 +26,7 @@ lipo -create \
 # Copy binaries to vscode extension
 echo "Copying binaries to vscode extension..."
 cd editors/vscode
-npm run build:all
+npm run build
 
 echo "=== Build complete ==="
 echo "Binaries are ready in editors/vscode/bin/"

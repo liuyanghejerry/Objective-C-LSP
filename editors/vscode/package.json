@@ -217,7 +217,7 @@
     "build:bin": "mkdir -p bin && cp ../../target/release/objc-lsp bin/objc-lsp-darwin-arm64",
     "build:bin:intel": "mkdir -p bin && cp ../../target/release/objc-lsp bin/objc-lsp-darwin-x64",
     "build:all": "npm run build:bin && npm run build:bin:intel",
-    "build": "npm run build:bin && npm run compile && npm run package",
+    "build": "npm run build:all && npm run compile && npm run package",
     "install-ext": "code --install-extension objc-lsp-$(node -p \"require('./package.json').version\").vsix --force"
   },
   "dependencies": {
