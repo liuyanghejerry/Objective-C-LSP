@@ -564,6 +564,16 @@ pub fn cocoapods_flags(workspace_root: &std::path::Path) -> Vec<String> {
             // synth_dir/  ←  add this as -I so <PodName/Foo.h> resolves
             flags.push("-I".to_owned());
             flags.push(synth_dir.to_string_lossy().into_owned());
+            // Also add each pod subdirectory so that flat quote-imports like
+            // `#import "Header.h"` resolve without a pod-name prefix.
+            if let Ok(rd) = std::fs::read_dir(&synth_dir) {
+                for entry in rd.flatten() {
+                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        flags.push("-I".to_owned());
+                        flags.push(entry.path().to_string_lossy().into_owned());
+                    }
+                }
+            }
         }
     }
 
@@ -759,6 +769,27 @@ mod tests {
         assert!(
             has_synth,
             "expected fallback -I <synth-dir> with MyPod/Foo.h when no Pods dir: {flags:?}"
+        );
+    }
+
+    #[test]
+    fn cocoapods_flags_fallback_adds_pod_subdirs_for_flat_imports() {
+        // Create a fake project: tmp/MyPod/Classes/Foo.h (no Pods/ dir)
+        // Flat import `#import "Foo.h"` should resolve via -I <synth>/MyPod/
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let classes = tmp.path().join("MyPod").join("Classes");
+        std::fs::create_dir_all(&classes).unwrap();
+        std::fs::write(classes.join("Foo.h"), "// header").unwrap();
+
+        let flags = cocoapods_flags(tmp.path());
+        // Should contain -I <synth>/MyPod so `#import "Foo.h"` resolves directly.
+        let has_pod_subdir = flags.windows(2).any(|w| {
+            w[0] == "-I"
+                && std::path::Path::new(&w[1]).join("Foo.h").exists()
+        });
+        assert!(
+            has_pod_subdir,
+            "expected fallback -I <synth>/MyPod so flat #import \"Foo.h\" resolves: {flags:?}"
         );
     }
 

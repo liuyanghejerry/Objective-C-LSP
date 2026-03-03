@@ -59,6 +59,28 @@ impl ClangIndex {
                 return Ok(None);
             }
 
+            // 0. InclusionDirective: cursor on a #import / #include filename token.
+            //    clang_getCursorDefinition / Referenced both return null for this kind;
+            //    use clang_getIncludedFile to resolve the physical header path directly.
+            if cursor_kind == 503 {
+                let included_file = unsafe { clang_getIncludedFile(cursor) };
+                if !included_file.is_null() {
+                    let cx_name = unsafe { clang_getFileName(included_file) };
+                    let filename = cx_string_owned(cx_name);
+                    if !filename.is_empty() {
+                        let uri: Uri = format!("file://{filename}")
+                            .parse()
+                            .map_err(|e| anyhow::anyhow!("invalid URI for {filename}: {e}"))?;
+                        let range = Range {
+                            start: lsp_types::Position { line: 0, character: 0 },
+                            end:   lsp_types::Position { line: 0, character: 0 },
+                        };
+                        return Ok(Some(GotoDefinitionResponse::Scalar(Location { uri, range })));
+                    }
+                }
+                return Ok(None);
+            }
+
             // 1. Try definition (e.g. @implementation body, function body).
             let def_cursor = unsafe { clang_getCursorDefinition(cursor) };
             if unsafe { clang_Cursor_isNull(def_cursor) } == 0 {
