@@ -2,16 +2,9 @@ import * as path from "path";
 import * as fs from "fs";
 import * as vscode from "vscode";
 
-/** Get platform-specific binary name */
+/** Get platform-specific binary name (for backwards compatibility) */
 function getPlatformBinaryName(): string {
-  const platform = process.platform;
-  const arch = process.arch;
-
-  // Map to vsce target platform names
-  if (platform === "darwin") {
-    return arch === "arm64" ? "objc-lsp-darwin-arm64" : "objc-lsp-darwin-x64";
-  }
-  // Fallback for other platforms
+  // Universal binary - works on both Apple Silicon and Intel
   return "objc-lsp";
 }
 

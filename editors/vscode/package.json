@@ -211,12 +211,11 @@
   "scripts": {
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "package": "vsce package --target darwin-arm64",
+    "package": "vsce package",
     "package:intel": "vsce package --target darwin-x64",
     "lint": "eslint src --ext ts",
-    "build:bin": "mkdir -p bin && cp ../../target/release/objc-lsp bin/objc-lsp-darwin-arm64",
-    "build:bin:intel": "mkdir -p bin && cp ../../target/release/objc-lsp bin/objc-lsp-darwin-x64",
-    "build:all": "npm run build:bin && npm run build:bin:intel",
+    "build:bin": "mkdir -p bin && cp ../../target/release/objc-lsp bin/objc-lsp",
+    "build:all": "npm run build:bin",
     "build": "npm run build:all && npm run compile && npm run package",
     "install-ext": "code --install-extension objc-lsp-$(node -p \"require('./package.json').version\").vsix --force"
   },
