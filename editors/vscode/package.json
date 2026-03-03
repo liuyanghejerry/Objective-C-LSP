@@ -213,10 +213,14 @@
     "watch": "node esbuild.mjs --watch",
     "package": "vsce package",
     "package:intel": "vsce package --target darwin-x64",
+    "package:ovsx": "ovsx package",
+    "package:ovsx:intel": "ovsx package --target darwin-x64",
+    "publish:ovsx": "ovsx publish",
     "lint": "eslint src --ext ts",
     "build:bin": "mkdir -p bin && cp ../../target/release/objc-lsp bin/objc-lsp",
     "build:all": "npm run build:bin",
     "build": "npm run build:all && npm run compile && npm run package",
+    "build:ovsx": "npm run build:all && npm run compile && npm run package:ovsx",
     "install-ext": "code --install-extension objc-lsp-$(node -p \"require('./package.json').version\").vsix --force"
   },
   "dependencies": {
@@ -227,6 +231,7 @@
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^2.22.0",
     "esbuild": "^0.20.0",
+    "ovsx": "^0.8.0",
     "typescript": "^5.3.0"
   }
 }
