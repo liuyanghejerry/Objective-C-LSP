@@ -162,7 +162,6 @@ If the extension does not auto-discover the server binary, set the path in setti
 |----------|--------|-------|
 | macOS (Apple Silicon) | ✅ Fully supported | Needs Xcode SDK installed. |
 | macOS (Intel) | ✅ Supported | Features implemented, testing needed on real hardware |
-| Linux | ✅ Supported | Features implemented, testing needed on real hardware |
 
 ## License
 

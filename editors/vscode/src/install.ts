@@ -2,10 +2,23 @@ import * as path from "path";
 import * as fs from "fs";
 import * as vscode from "vscode";
 
+/** Get platform-specific binary name */
+function getPlatformBinaryName(): string {
+  const platform = process.platform;
+  const arch = process.arch;
+
+  // Map to vsce target platform names
+  if (platform === "darwin") {
+    return arch === "arm64" ? "objc-lsp-darwin-arm64" : "objc-lsp-darwin-x64";
+  }
+  // Fallback for other platforms
+  return "objc-lsp";
+}
+
 /**
  * Priority order for locating the objc-lsp binary:
  * 1. User's explicit setting: objc-lsp.serverPath
- * 2. Binary bundled alongside the extension (editors/vscode/bin/objc-lsp)
+ * 2. Binary bundled alongside the extension (bin/objc-lsp-{platform})
  * 3. PATH lookup
  */
 export function findServerBinary(
@@ -18,9 +31,16 @@ export function findServerBinary(
   }
 
   // Bundled binary (shipped inside the .vsix)
-  const bundled = path.join(context.extensionPath, "bin", "objc-lsp");
+  const binaryName = getPlatformBinaryName();
+  const bundled = path.join(context.extensionPath, "bin", binaryName);
   if (fs.existsSync(bundled)) {
     return bundled;
+  }
+
+  // Fallback to generic name for backwards compatibility
+  const fallback = path.join(context.extensionPath, "bin", "objc-lsp");
+  if (fs.existsSync(fallback)) {
+    return fallback;
   }
 
   // PATH lookup
