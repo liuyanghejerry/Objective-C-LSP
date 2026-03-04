@@ -160,7 +160,7 @@ export function buildProtocolMap(
   document: vscode.TextDocument
 ): Map<string, string[]> {
   const map = new Map<string, string[]>();
-  const regex = /@interface\s+(\w+)\s*(?::\s*\w+)?\s*<([^>]+)>/g;
+  const regex = /@interface\s+(\w+)\s*(?::\s*\w+)?\s*(?:\([^)]*\))?\s*<([^>]+)>/g;
 
   const text = document.getText();
   let match: RegExpExecArray | null;

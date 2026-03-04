@@ -25,7 +25,7 @@ suite("findMatchingBrace", () => {
 
   test("handles nested braces", () => {
     const text = "^{ if (x) { bar } }";
-    assert.strictEqual(findMatchingBrace(text, 1), 19);
+    assert.strictEqual(findMatchingBrace(text, 1), 18);
   });
 
   test("returns -1 when unmatched", () => {

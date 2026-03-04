@@ -1,6 +1,5 @@
 import * as assert from "assert";
 import * as path from "path";
-import * as fs from "fs";
 import * as vscode from "vscode";
 import { findServerBinary } from "../../src/install";
 
@@ -8,17 +7,22 @@ import { findServerBinary } from "../../src/install";
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Use require() to get the raw (writable) fs module — TypeScript's
+// __importStar wraps every property as a getter, making direct assignment fail.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const fsRaw: typeof import("fs") = require("fs");
+
 /** Stub fs.existsSync for the duration of a callback. */
 function withExistsStub(
   stub: (p: string) => boolean,
   fn: () => void
 ): void {
-  const original = fs.existsSync;
-  (fs as { existsSync: typeof fs.existsSync }).existsSync = stub as typeof fs.existsSync;
+  const original = fsRaw.existsSync;
+  fsRaw.existsSync = stub as typeof fsRaw.existsSync;
   try {
     fn();
   } finally {
-    (fs as { existsSync: typeof fs.existsSync }).existsSync = original;
+    fsRaw.existsSync = original;
   }
 }
 
@@ -27,21 +31,20 @@ function withConfigStub(
   values: Record<string, unknown>,
   fn: () => void
 ): void {
-  const original = vscode.workspace.getConfiguration;
-  (vscode.workspace as { getConfiguration: typeof vscode.workspace.getConfiguration }).getConfiguration =
-    ((_section?: string) => ({
-      get: <T>(key: string, defaultValue?: T): T => {
-        return (key in values ? values[key] : defaultValue) as T;
-      },
-      has: (key: string) => key in values,
-      inspect: () => undefined,
-      update: async () => undefined,
-    })) as typeof vscode.workspace.getConfiguration;
+  const ws = vscode.workspace as unknown as Record<string, unknown>;
+  const original = ws["getConfiguration"];
+  ws["getConfiguration"] = (_section?: string) => ({
+    get: <T>(key: string, defaultValue?: T): T => {
+      return (key in values ? values[key] : defaultValue) as T;
+    },
+    has: (key: string) => key in values,
+    inspect: () => undefined,
+    update: async () => undefined,
+  });
   try {
     fn();
   } finally {
-    (vscode.workspace as { getConfiguration: typeof vscode.workspace.getConfiguration }).getConfiguration =
-      original;
+    ws["getConfiguration"] = original;
   }
 }
 
