@@ -10,6 +10,9 @@ members = [
 ]
 exclude = ["editors/zed"]
 
+[workspace.package]
+license = "MIT"
+
 [workspace.dependencies]
 # LSP
 lsp-server = "0.7"

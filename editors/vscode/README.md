@@ -165,4 +165,4 @@ If the extension does not auto-discover the server binary, set the path in setti
 
 ## License
 
-The VS Code extension is free for personal and commercial use. See [LICENSE](./LICENSE) for details.
+This extension is licensed under the [MIT License](./LICENSE).

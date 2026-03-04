@@ -1,0 +1,3 @@
+[submodule "editors/zed/grammars/objc"]
+	path = editors/zed/grammars/objc
+	url = https://github.com/tree-sitter-grammars/tree-sitter-objc.git

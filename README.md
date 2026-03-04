@@ -142,8 +142,8 @@ sudo dnf install clang-devel
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/objc-lsp/objc-lsp.git
-cd objc-lsp
+git clone https://github.com/liuyanghejerry/Objective-C-LSP.git
+cd Objective-C-LSP
 
 # 2. Build the LSP server (MUST use --release)
 cargo build --release --workspace
@@ -273,6 +273,4 @@ Open Zed → Extensions → Install Dev Extension → select editors/zed
 
 ## License
 
-* VS Code extension is free for personal and commercial use. Check editors/vscode/LICENSE for details.
-* Zed extension is distributed under the MIT License.
-* Objective-C LSP server is closed-source, for now.
+This project is licensed under the [MIT License](LICENSE).

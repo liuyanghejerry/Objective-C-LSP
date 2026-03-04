@@ -4,7 +4,7 @@ version = "0.1.0"
 schema_version = 1
 authors = ["objc-lsp contributors <objc-lsp@users.noreply.github.com>"]
 description = "Objective-C language support via objc-lsp: completion, hover, diagnostics, rename, and more."
-repository = "https://github.com/objc-lsp/objc-lsp"
+repository = "https://github.com/liuyanghejerry/Objective-C-LSP"
 
 [grammars.objc]
 repository = "https://github.com/tree-sitter-grammars/tree-sitter-objc"
