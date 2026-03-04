@@ -123,7 +123,49 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
-  # ── Step 3: Build Zed extension WASM ──────────────────────────────────────
+  # ── Step 3: Package Open-VSX extension ──────────────────────────────────────
+  package-ovsx:
+    needs: build-binary
+    runs-on: ubuntu-latest
+    name: Package Open-VSX
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install extension dependencies
+        working-directory: ${{ env.EXTENSION_DIR }}
+        run: npm ci
+
+      - name: Build extension
+        working-directory: ${{ env.EXTENSION_DIR }}
+        run: node esbuild.mjs
+
+      - name: Download platform binary
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-darwin-arm64
+          path: ${{ env.EXTENSION_DIR }}/bin
+
+      - name: Make binary executable
+        run: chmod +x ${{ env.EXTENSION_DIR }}/bin/objc-lsp
+
+      - name: Package Open-VSX artifact
+        working-directory: ${{ env.EXTENSION_DIR }}
+        run: npm run package:ovsx
+
+      - name: Upload Open-VSX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ovsx-extension
+          path: ${{ env.EXTENSION_DIR }}/*-ovsx.vsix
+          if-no-files-found: error
+          retention-days: 5
+
+  # ── Step 4: Build Zed extension WASM ──────────────────────────────────────
   build-zed:
     runs-on: ubuntu-latest
     name: Build Zed extension (WASM)
@@ -156,9 +198,9 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
-  # ── Step 4: Publish to GitHub Releases ─────────────────────────────────────
+  # ── Step 5: Publish to GitHub Releases ─────────────────────────────────────
   publish:
-    needs: [package-vsix, build-binary, build-zed]
+    needs: [package-vsix, package-ovsx, build-binary, build-zed]
     runs-on: ubuntu-latest
     name: Publish Release
 
@@ -171,6 +213,12 @@ jobs:
           pattern: vsix-*
           path: vsix-artifacts
           merge-multiple: true
+
+      - name: Download Open-VSX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ovsx-extension
+          path: ovsx-artifacts
 
       - name: Download raw binaries for Zed runtime download
         uses: actions/download-artifact@v4
@@ -198,6 +246,8 @@ jobs:
         run: |
           echo '=== VSIX files ==='
           ls -lh vsix-artifacts/
+          echo '=== Open-VSX files ==='
+          ls -lh ovsx-artifacts/
           echo '=== Binary files ==='
           ls -lh release-binaries/
           echo '=== Zed extension ==='
@@ -208,6 +258,7 @@ jobs:
         with:
           files: |
             vsix-artifacts/*.vsix
+            ovsx-artifacts/*-ovsx.vsix
             release-binaries/objc-lsp-*
           generate_release_notes: true
           draft: false
