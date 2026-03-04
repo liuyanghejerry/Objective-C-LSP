@@ -2,21 +2,8 @@
 
 > The first Language Server Protocol implementation designed specifically for Objective-C.
 
-Existing tools (clangd, ccls, sourcekit-lsp) treat Objective-C as an afterthought — a by-product of C/C++/Swift support. **objc-lsp** is built from the ground up to understand Objective-C semantics: selectors, categories, `@interface`/`@implementation` duality, blocks, and `@property` coordination.
+**objc-lsp** is built from the ground up to understand Objective-C semantics: selectors, categories, `@interface`/`@implementation` duality, blocks, and `@property` coordination.
 
-## Why Not clangd?
-
-I found current solutions are not really handy when working with Objective-C.
-
-| Problem | clangd Issue | objc-lsp |
-|---------|-------------|----------|
-| `.h` files misidentified as C, not ObjC | [#621](https://github.com/clangd/clangd/issues/621) (open since 2020) | ✅ Content heuristic detects `@interface`/`@implementation` |
-| Incomplete selector completion (`[tableView cellForRowAtIndexPath:]`) | [#656](https://github.com/clangd/clangd/issues/656) (open since 2020) | ✅ Multi-part selector completion with full fill-in |
-| `@property` rename doesn't coordinate getter/setter/ivar | [llvm#81775](https://github.com/llvm/llvm-project/issues/81775) (open since 2024) | ✅ Coordinated rename across getter, setter, backing ivar, and dot syntax |
-| sourcekit-lsp just spawns clangd for ObjC | — | ✅ Native ObjC implementation, no delegation |
-| Requires `compile_commands.json` | — | ✅ Parses `.xcodeproj` directly, works out of the box |
-
-Furthermore, VS Code extensions provide additional user-friendly features that go beyond what LSP can offer—features that clangd alone cannot achieve.
 
 ## Features
 
@@ -30,7 +17,7 @@ Furthermore, VS Code extensions provide additional user-friendly features that g
 
 **Editor Enhancement (Phase 5)** — Code formatting (clang-format), code folding, call hierarchy, type hierarchy
 
-### VS Code Extension
+### [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=liuyanghejerry.objc-lsp)
 
 Beyond standard LSP features, the VS Code extension provides:
 
@@ -42,6 +29,8 @@ Beyond standard LSP features, the VS Code extension provides:
 - **Class Browser** — Project-wide class hierarchy tree
 - **Call Graph Webview** — Interactive method call relationship visualization
 - **Hover Extensions** — API availability parsing, deprecation warnings, related methods with clickable navigation, quick fix links
+
+> **Note**: For VS Code forks such as [Cursor](https://cursor.sh), install from [Open VSX Registry](https://open-vsx.org/extension/liuyanghejerry/objc-lsp) instead.
 
 ### Zed Extension
 
@@ -279,6 +268,20 @@ Open Zed → Extensions → Install Dev Extension → select editors/zed
 | **macOS** (Apple Silicon) | ✅ Primary | Full Xcode SDK integration, iOS Simulator SDK detection |
 | **macOS** (Intel) | ✅ Supported | Full feature parity |
 | **Linux** | ✅ Supported | GNUstep include path auto-detection |
+
+## Acknowledgments
+
+This project is made possible by the following open-source projects:
+
+- [tree-sitter](https://github.com/tree-sitter/tree-sitter) and [tree-sitter-objc](https://github.com/tree-sitter-grammars/tree-sitter-objc) — Fast, incremental parsing for Objective-C
+- [clang / libclang](https://clang.llvm.org/) — Semantic analysis backbone
+- [lsp-server](https://github.com/rust-lang/rust-analyzer/tree/master/lib/lsp-server) and [lsp-types](https://github.com/gluon-lang/lsp-types) — LSP framework by the rust-analyzer team
+- [rusqlite](https://github.com/rusqlite/rusqlite) — SQLite bindings for the index store
+- [tokio](https://tokio.rs/) — Async runtime
+- [Zed](https://zed.dev/) — Editor and extension API
+- [vscode-languageclient](https://github.com/microsoft/vscode-languageserver-node) — VS Code LSP client library by Microsoft
+
+Development of this project was assisted by [OpenCode](https://github.com/nicepkg/opencode) and [Oh My OpenCode](https://github.com/nicepkg/oh-my-opencode).
 
 ## License
 
