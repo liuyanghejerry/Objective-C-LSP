@@ -156,7 +156,7 @@ class ObjCCodeLensProvider implements vscode.CodeLensProvider {
  * Scan the document for `@interface ClassName : Super <Proto1, Proto2>`
  * and build a map of class name → protocol list.
  */
-function buildProtocolMap(
+export function buildProtocolMap(
   document: vscode.TextDocument
 ): Map<string, string[]> {
   const map = new Map<string, string[]>();

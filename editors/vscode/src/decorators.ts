@@ -48,7 +48,7 @@ const DEBOUNCE_MS = 500;
  * Find `self` references inside block literals that are not already
  * weakSelf/strongSelf patterns.
  */
-function findRetainCycles(
+export function findRetainCycles(
   document: vscode.TextDocument
 ): vscode.DecorationOptions[] {
   const decorations: vscode.DecorationOptions[] = [];
@@ -113,7 +113,7 @@ function findRetainCycles(
 /**
  * Find @property declarations where delegate/dataSource uses strong.
  */
-function findStrongDelegates(
+export function findStrongDelegates(
   document: vscode.TextDocument
 ): vscode.DecorationOptions[] {
   const decorations: vscode.DecorationOptions[] = [];
@@ -174,7 +174,7 @@ function findStrongDelegates(
  * Skips: 0, 1, 2, -1, numbers in #define/enum/const/static const,
  * array subscripts, and common framework constants.
  */
-function findMagicNumbers(
+export function findMagicNumbers(
   document: vscode.TextDocument
 ): vscode.DecorationOptions[] {
   const decorations: vscode.DecorationOptions[] = [];
@@ -263,7 +263,7 @@ function findMagicNumbers(
 // ── Brace matching helper ─────────────────────────────────────────────────
 
 /** Find the index of the closing brace matching the opening brace at `pos`. */
-function findMatchingBrace(text: string, pos: number): number {
+export function findMatchingBrace(text: string, pos: number): number {
   let depth = 0;
   for (let i = pos; i < text.length; i++) {
     if (text[i] === "{") {
