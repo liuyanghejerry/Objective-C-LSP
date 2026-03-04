@@ -231,6 +231,73 @@ Layer 3: 端到端测试（仅 macOS CI，真实二进制）[可选]
 
 ---
 
+## 第二步实施：vscode-extension-tester GUI 测试
+
+**实施日期**: 2026-03-04  
+**工具版本**: `vscode-extension-tester@8.22.1`
+
+### 覆盖场景
+
+| 文件 | 场景 | 验证方式 |
+|---|---|---|
+| `test/ui/addProperty.test.ts` | `objc-lsp.addProperty` 命令将 ivar 行转换为 `@property` 声明 | `TextEditor.getTextAtLine()` 断言转换后文本 |
+| `test/ui/decorators.test.ts` | retain-cycle 装饰器显示（`⚠️ retain cycle` after-text）；magic-number 装饰器令牌存在 | WebDriver XPath 查询 DOM 中的 decoration 元素 |
+| `test/ui/codelens.test.ts` | 方法上方出现 Code Lens（references 类型）；`@implementation` 上方出现 protocol conformance lens | `TextEditor.getCodeLenses()` / `getCodeLens(title)` |
+
+### 目录结构
+
+```
+editors/vscode/
+├── test/
+│   ├── ui/
+│   │   ├── runUITest.ts          ← ExTester 入口（下载 VS Code、安装 VSIX、运行）
+│   │   ├── addProperty.test.ts   ← 2 用例
+│   │   ├── decorators.test.ts    ← 2 用例
+│   │   └── codelens.test.ts      ← 3 用例
+│   └── fixtures/
+│       └── workspace/
+│           └── UITestFixture.m    ← GUI 测试专用 fixture
+└── package.json                   ← 新增 pretest:ui / test:ui scripts
+```
+
+### 运行方式
+
+```bash
+# 首次运行（会下载 VS Code + ChromeDriver，约 200MB）：
+npm run test:ui
+
+# 仅编译（不运行）：
+npx tsc -p tsconfig.test.json --noEmit
+```
+
+### CI 配置变更
+
+`.github/workflows/vscode-ext-test.yml` 新增 `test-ui` job：
+- 仅在 `macos-latest` 上运行（扩展声明 platforms: darwin）
+- `continue-on-error: true`（GUI 测试实验性，不阻断 PR）
+- 打包 VSIX → 编译 TypeScript → 运行 `runUITest.js`
+- 失败时上传截图为 GitHub Actions artifact
+
+### API 说明
+
+| 功能 | API | 备注 |
+|---|---|---|
+| 打开文件 | `VSBrowser.instance.openResources(path)` | 可传入多个路径 |
+| 获取 TextEditor | `new EditorView().openEditor(title)` | 需先 openResources |
+| 读取行文本 | `editor.getTextAtLine(n)` | 1-indexed |
+| 移动光标 | `editor.moveCursor(line, col)` | 1-indexed |
+| 执行命令 | `new Workbench().executeCommand(title)` | 按命令标题触发 |
+| Code Lens 列表 | `editor.getCodeLenses()` | 返回 CodeLens[] |
+| 按标题查 Lens | `editor.getCodeLens(partialTitle)` | 正则匹配 |
+| WebDriver DOM | `VSBrowser.instance.driver.findElements(By.xpath(...))` | 用于 decoration DOM 查询 |
+
+### 限制与说明
+
+- **装饰器验证的局限性**：VS Code 将 `setDecorations` 的 `after.contentText` 渲染为真实 DOM 元素，但其 CSS class 名在不同 VS Code 版本可能变化。XPath 采用模糊匹配（`contains(@class,'ced-')`），在版本升级时可能需要调整。
+- **Code Lens 依赖引用解析**：reference-count lens 需要 LSP 服务器运行才能 resolve。在 GUI 测试中 VSIX 安装但未配置真实 LSP binary，因此 `provideCodeLenses` 会正常返回 unresolved lens（title = `$(references) ? references`），测试以此为据。Protocol conformance lens 是静态 lens，不依赖 LSP，可直接验证。
+- **测试超时**：GUI 测试每个 suite 设置 60–90 秒 timeout，以容纳 VS Code UI 渲染延迟。
+
+
 ## 参考资料
 
 - [VS Code: Testing Extensions](https://code.visualstudio.com/api/working-with-extensions/testing-extension)
@@ -241,3 +308,5 @@ Layer 3: 端到端测试（仅 macOS CI，真实二进制）[可选]
 - [octref/vscode-language-server-e2e-test](https://github.com/octref/vscode-language-server-e2e-test)
 - [rockerBOO/mock-lsp-server](https://github.com/rockerBOO/mock-lsp-server)
 - [Electron: Testing on Headless CI](https://electronjs.org/docs/latest/tutorial/testing-on-headless-ci)
+- [vscode-extension-tester](https://github.com/redhat-developer/vscode-extension-tester)
+- [vscode-extension-tester: Page Object API](https://github.com/redhat-developer/vscode-extension-tester/wiki/Page-Object-APIs)

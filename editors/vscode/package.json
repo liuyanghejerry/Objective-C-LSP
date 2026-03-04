@@ -223,7 +223,9 @@
     "build:ovsx": "npm run build:all && npm run compile && npm run package:ovsx",
     "install-ext": "code --install-extension objc-lsp-$(node -p \"require('./package.json').version\").vsix --force",
     "pretest": "tsc -p tsconfig.test.json",
-    "test": "node ./out/test/runTest.js"
+    "test": "node ./out/test/runTest.js",
+    "pretest:ui": "tsc -p tsconfig.test.json",
+    "test:ui": "node ./out/test/ui/runUITest.js"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
@@ -239,6 +241,7 @@
     "esbuild": "^0.20.0",
     "mocha": "^11.7.5",
     "ovsx": "^0.8.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vscode-extension-tester": "^8.22.1"
   }
 }

@@ -9,6 +9,7 @@ on:
       - "editors/vscode/**"
 
 jobs:
+  # ── Unit + Integration tests (fast, no display required) ─────────────────
   test:
     strategy:
       matrix:
@@ -39,3 +40,50 @@ jobs:
         if: runner.os == 'macOS'
         run: npm test
         working-directory: editors/vscode
+
+  # ── GUI tests (vscode-extension-tester, macOS only) ──────────────────────
+  test-ui:
+    # GUI tests require a pre-packaged VSIX. We only run on macOS because the
+    # extension declares "platforms": ["darwin"] in package.json.
+    # On Linux xvfb-run would work but the extension itself is macOS-only.
+    runs-on: macos-latest
+    # Don't block PRs on GUI test failures — they are experimental and can be
+    # flaky. We still want them to run so failures are visible.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: editors/vscode
+
+      # The GUI tests need a packaged .vsix to install into the test VS Code.
+      # We use --no-dependencies to skip marketplace lookups in CI.
+      - name: Package extension VSIX
+        run: npx vsce package --no-dependencies
+        working-directory: editors/vscode
+
+      - name: Compile TypeScript (test files)
+        run: npx tsc -p tsconfig.test.json
+        working-directory: editors/vscode
+
+      - name: Run GUI tests
+        run: node ./out/test/ui/runUITest.js
+        working-directory: editors/vscode
+        timeout-minutes: 10
+
+      - name: Upload UI test screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-test-screenshots
+          path: editors/vscode/.ui-test/screenshots/
+          if-no-files-found: ignore
