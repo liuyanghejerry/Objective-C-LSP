@@ -127,7 +127,12 @@ jobs:
   package-ovsx:
     needs: build-binary
     runs-on: ubuntu-latest
-    name: Package Open-VSX
+    name: Package Open-VSX (${{ matrix.vsce-target }})
+    strategy:
+      matrix:
+        vsce-target:
+          - darwin-arm64
+          - darwin-x64
 
     steps:
       - uses: actions/checkout@v4
@@ -147,7 +152,7 @@ jobs:
       - name: Download platform binary
         uses: actions/download-artifact@v4
         with:
-          name: binary-darwin-arm64
+          name: binary-${{ matrix.vsce-target }}
           path: ${{ env.EXTENSION_DIR }}/bin
 
       - name: Make binary executable
@@ -155,13 +160,13 @@ jobs:
 
       - name: Package Open-VSX artifact
         working-directory: ${{ env.EXTENSION_DIR }}
-        run: npm run package:ovsx
+        run: npx vsce package --target ${{ matrix.vsce-target }} --no-dependencies -o objc-lsp-$(node -p "require('./package.json').version")-ovsx-${{ matrix.vsce-target }}.vsix
 
       - name: Upload Open-VSX artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ovsx-extension
-          path: ${{ env.EXTENSION_DIR }}/*-ovsx.vsix
+          name: ovsx-${{ matrix.vsce-target }}
+          path: ${{ env.EXTENSION_DIR }}/*-ovsx-${{ matrix.vsce-target }}.vsix
           if-no-files-found: error
           retention-days: 5
 
@@ -217,8 +222,9 @@ jobs:
       - name: Download Open-VSX artifact
         uses: actions/download-artifact@v4
         with:
-          name: ovsx-extension
+          pattern: ovsx-*
           path: ovsx-artifacts
+          merge-multiple: true
 
       - name: Download raw binaries for Zed runtime download
         uses: actions/download-artifact@v4
@@ -258,7 +264,7 @@ jobs:
         with:
           files: |
             vsix-artifacts/*.vsix
-            ovsx-artifacts/*-ovsx.vsix
+            ovsx-artifacts/*-ovsx-*.vsix
             release-binaries/objc-lsp-*
           generate_release_notes: true
           draft: false
