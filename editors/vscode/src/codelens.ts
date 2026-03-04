@@ -84,7 +84,7 @@ class ObjCCodeLensProvider implements vscode.CodeLensProvider {
           lenses.push(
             new vscode.CodeLens(range, {
               title: `$(symbol-interface) Conforms to: ${protocols.join(", ")}`,
-              command: "",
+              command: "workbench.action.focusActiveEditorGroup",
             })
           );
         }
@@ -103,7 +103,7 @@ class ObjCCodeLensProvider implements vscode.CodeLensProvider {
           lenses.push(
             new vscode.CodeLens(range, {
               title: `── ${label} ──`,
-              command: "",
+              command: "workbench.action.focusActiveEditorGroup",
             })
           );
         }

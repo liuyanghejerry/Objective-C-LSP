@@ -315,9 +315,25 @@ function scheduleUpdate(editor: vscode.TextEditor | undefined): void {
 
 /** Register text decorators. Call from `activate()`. */
 export function registerDecorators(context: vscode.ExtensionContext): void {
-  // Apply on active editor change.
+  // Apply when a text editor becomes active (covers tab switches and new opens).
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (editor) {
+        scheduleUpdate(editor);
+      }
+    })
+  );
+
+  // Apply when a document is opened or shown — catches the case where the
+  // test opens a file programmatically and the active-editor event has
+  // already fired before our subscription was registered.
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      // Find the visible editor for this document (may be undefined if
+      // the document was opened in background).
+      const editor = vscode.window.visibleTextEditors.find(
+        (e) => e.document === document
+      );
       if (editor) {
         scheduleUpdate(editor);
       }
