@@ -243,10 +243,19 @@ npx vsce package --no-dependencies
 code --install-extension objc-lsp-0.1.0.vsix --force
 ```
 
-For the Zed extension:
+For the Zed extension, Zed compiles the WASM automatically when you install a dev extension:
+
+```bash
+# Ensure Rust is installed via rustup (not Homebrew)
+rustup target add wasm32-wasip2
+
+# Initialize the grammar submodule
+git submodule update --init editors/zed/grammars/objc
+```
+
+Then install as a dev extension:
 
 ```
-# Zed extension: install as dev extension
 Open Zed → Extensions → Install Dev Extension → select editors/zed
 ```
 

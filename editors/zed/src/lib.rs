@@ -5,7 +5,7 @@ use zed_extension_api::{
     GithubReleaseOptions, LanguageServerInstallationStatus, Os, Result,
 };
 
-const GITHUB_REPO: &str = "objc-lsp/objc-lsp";
+const GITHUB_REPO: &str = "liuyanghejerry/Objective-C-LSP";
 const BINARY_NAME: &str = "objc-lsp";
 
 struct ObjcLspExtension {
