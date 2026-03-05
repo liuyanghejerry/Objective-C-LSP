@@ -114,8 +114,6 @@ objc-lsp uses a **dual-layer parsing architecture**: tree-sitter for fast, fault
 
 - **Rust** (stable, 1.75+) — for building the LSP server
 - **libclang** — provided by Xcode (macOS) or LLVM (Linux)
-- **Node.js** (18+) — for building the VS Code extension
-- **VS Code** (1.85+) and/or **Zed** (1.x+) — editor
 
 On macOS with Xcode installed, libclang is available automatically. On Linux, install LLVM:
 
@@ -127,17 +125,107 @@ sudo apt install libclang-dev
 sudo dnf install clang-devel
 ```
 
-### Build & Install
+### Build the LSP Server
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/liuyanghejerry/Objective-C-LSP.git
 cd Objective-C-LSP
 
-# 2. Build the LSP server (MUST use --release)
+# 2. Build the LSP server binary (MUST use --release)
 cargo build --release --workspace
+```
 
-# 3. Build and install the VS Code extension
+The compiled binary is located at `target/release/objc-lsp`. You can copy it to any directory on your `$PATH` (e.g. `~/.local/bin/`):
+
+```bash
+cp target/release/objc-lsp ~/.local/bin/objc-lsp
+```
+
+## Usage
+
+objc-lsp communicates over **stdio** using the standard LSP JSON-RPC protocol, so it works with any LSP-compatible editor.
+
+### Neovim
+
+#### Built-in LSP (`vim.lsp`, Neovim 0.10+)
+
+No plugins required. Add the following to your Neovim configuration (`init.lua`):
+
+```lua
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = { 'objc', 'objcpp' },
+  callback = function()
+    vim.lsp.start({
+      name = 'objc-lsp',
+      cmd = { vim.fn.expand('~/.local/bin/objc-lsp') },
+      root_dir = vim.fs.dirname(
+        vim.fs.find(
+          { '*.xcodeproj', 'compile_commands.json', '.git' },
+          { upward = true }
+        )[1]
+      ),
+    })
+  end,
+})
+```
+
+Replace `~/.local/bin/objc-lsp` with the actual path to the binary if it differs.
+
+#### nvim-lspconfig
+
+If you use [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig), register objc-lsp as a custom server:
+
+```lua
+local lspconfig = require('lspconfig')
+local configs = require('lspconfig.configs')
+
+if not configs.objc_lsp then
+  configs.objc_lsp = {
+    default_config = {
+      cmd = { vim.fn.expand('~/.local/bin/objc-lsp') },
+      filetypes = { 'objc', 'objcpp' },
+      root_dir = lspconfig.util.root_pattern(
+        '*.xcodeproj', 'compile_commands.json', '.git'
+      ),
+      single_file_support = true,
+    },
+  }
+end
+
+lspconfig.objc_lsp.setup({})
+```
+
+### Emacs
+
+Replace `"/path/to/objc-lsp"` in the examples below with the full path to the binary (e.g. `~/.local/bin/objc-lsp`), or ensure the binary is on your system `$PATH` and use `"objc-lsp"` directly.
+
+#### eglot (built-in, Emacs 29+)
+
+```emacs-lisp
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs
+               '((objc-mode objc++-mode) . ("/path/to/objc-lsp"))))
+```
+
+#### lsp-mode
+
+```emacs-lisp
+(with-eval-after-load 'lsp-mode
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection "/path/to/objc-lsp")
+    :major-modes '(objc-mode objc++-mode)
+    :server-id 'objc-lsp)))
+```
+
+### VS Code
+
+Install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=liuyanghejerry.objc-lsp) (or [Open VSX](https://open-vsx.org/extension/liuyanghejerry/objc-lsp) for VS Code forks such as [Cursor](https://cursor.sh)).
+
+To build and install from source:
+
+```bash
 cd editors/vscode
 npm install
 node esbuild.mjs
@@ -145,15 +233,7 @@ npx vsce package --no-dependencies
 code --install-extension objc-lsp-0.1.0.vsix --force
 ```
 
-For the Zed extension, install as a dev extension:
-
-```
-Open Zed → Extensions → Install Dev Extension → select editors/zed
-```
-
-### Configuration
-
-After installation, set the server path in VS Code settings:
+After installation, optionally set the server binary path in VS Code settings (`settings.json`):
 
 ```json
 {
@@ -163,7 +243,7 @@ After installation, set the server path in VS Code settings:
 
 If left empty, the extension auto-discovers the binary from `$PATH` or the bundled location.
 
-#### Available Settings
+#### Available VS Code Settings
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
@@ -175,6 +255,14 @@ If left empty, the extension auto-discovers the binary from `$PATH` or the bundl
 | `objc-lsp.enableCodeLens` | `boolean` | `true` | Show Code Lens annotations above methods |
 | `objc-lsp.enableDecorators` | `boolean` | `true` | Show inline decorators for retain cycles, etc. |
 | `objc-lsp.enableHoverExtensions` | `boolean` | `true` | Show extended hover info |
+
+### Zed
+
+Install the extension from the Zed extension registry, or install as a dev extension from source:
+
+```
+Open Zed → Extensions → Install Dev Extension → select editors/zed
+```
 
 ## Development
 
@@ -232,7 +320,7 @@ npx vsce package --no-dependencies
 code --install-extension objc-lsp-0.1.0.vsix --force
 ```
 
-For the Zed extension, Zed compiles the WASM automatically when you install a dev extension:
+For the Zed extension, Zed compiles the WASM automatically. Before installing the dev extension, ensure the grammar submodule is initialized:
 
 ```bash
 # Ensure Rust is installed via rustup (not Homebrew)
@@ -240,12 +328,6 @@ rustup target add wasm32-wasip2
 
 # Initialize the grammar submodule
 git submodule update --init editors/zed/grammars/objc
-```
-
-Then install as a dev extension:
-
-```
-Open Zed → Extensions → Install Dev Extension → select editors/zed
 ```
 
 ### Key Dependencies
