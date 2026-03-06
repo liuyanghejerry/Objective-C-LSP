@@ -13,9 +13,6 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "platforms": [
-    "darwin"
-  ],
   "categories": [
     "Programming Languages",
     "Formatters",
