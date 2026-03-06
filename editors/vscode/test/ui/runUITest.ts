@@ -13,9 +13,12 @@ import * as path from "path";
 import { ExTester, ReleaseQuality } from "vscode-extension-tester";
 
 const STORAGE_FOLDER = path.resolve(__dirname, "../../../.ui-test");
+const PKG_JSON = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, "../../../package.json"), "utf-8")
+);
 const VSIX_PATH = path.resolve(
   __dirname,
-  "../../../objc-lsp-0.3.0.vsix"
+  `../../../objc-lsp-${PKG_JSON.version}.vsix`
 );
 const WORKSPACE = path.resolve(
   __dirname,
