@@ -222,7 +222,7 @@
     "build": "npm run build:all && npm run compile && npm run package",
     "build:ovsx": "npm run build:all && npm run compile && npm run package:ovsx",
     "install-ext": "code --install-extension objc-lsp-$(node -p \"require('./package.json').version\").vsix --force",
-    "pretest": "tsc -p tsconfig.test.json",
+    "pretest": "node esbuild.mjs && tsc -p tsconfig.test.json",
     "test": "node ./out/test/runTest.js",
     "pretest:ui": "tsc -p tsconfig.test.json",
     "test:ui": "node ./out/test/ui/runUITest.js"

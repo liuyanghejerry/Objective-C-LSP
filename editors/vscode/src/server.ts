@@ -21,7 +21,11 @@ export async function startClient(
 
   const serverBin = findServerBinary(context);
   if (!serverBin) {
-    await promptInstall();
+    // Show the install prompt without blocking activation — the user can
+    // interact with the notification asynchronously while extension features
+    // (commands, code lens, decorators) that don't need the server are already
+    // registered and functional.
+    void promptInstall();
     return undefined;
   }
 

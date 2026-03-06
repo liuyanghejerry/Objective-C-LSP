@@ -291,6 +291,7 @@ export async function waitForCodeLenses(
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    // Strategy 1: try the library API (works on older VS Code versions)
     try {
       const lenses = await editor.getCodeLenses();
       if (lenses.length > 0) {
@@ -299,6 +300,33 @@ export async function waitForCodeLenses(
     } catch {
       // Ignore transient errors during polling
     }
+
+    // Strategy 2: DOM-based detection — VS Code 1.110 changed the code lens DOM
+    // structure so the library API may return 0 even when lenses are visible.
+    try {
+      const domFound = await driver.executeScript<boolean>(`
+        try {
+          // Check for elements with "codelens" in class or widgetid
+          const byClass = document.querySelector('[class*="codelens"],[widgetid*="codelens"]');
+          if (byClass) return true;
+          // Check for resolved reference-count text ("N references" or "? references")
+          const all = document.querySelectorAll('*');
+          for (const el of all) {
+            if (el.childElementCount === 0 && el.textContent) {
+              const t = el.textContent.trim();
+              if (/\\d+\\s+references?|[?]\\s+references?|Conforms to/i.test(t)) return true;
+            }
+          }
+          return false;
+        } catch(e) { return false; }
+      `);
+      if (domFound) {
+        return;
+      }
+    } catch {
+      // Ignore executeScript errors
+    }
+
     await driver.sleep(800);
   }
   // Don't throw here — let individual tests report the failure with context

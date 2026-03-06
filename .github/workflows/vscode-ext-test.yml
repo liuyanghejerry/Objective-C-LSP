@@ -65,6 +65,11 @@ jobs:
         run: npm ci
         working-directory: editors/vscode
 
+      # Build the extension bundle before packaging
+      - name: Compile extension
+        run: node esbuild.mjs
+        working-directory: editors/vscode
+
       # The GUI tests need a packaged .vsix to install into the test VS Code.
       # We use --no-dependencies to skip marketplace lookups in CI.
       - name: Package extension VSIX
