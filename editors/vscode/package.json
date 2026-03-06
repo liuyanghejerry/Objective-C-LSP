@@ -2,7 +2,7 @@
   "name": "objc-lsp",
   "displayName": "Objective-C Language Server",
   "description": "First-class Objective-C language support via objc-lsp (completion, hover, diagnostics, rename, and more)",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "liuyanghejerry",
   "license": "MIT",
   "icon": "icons/icon.png",
