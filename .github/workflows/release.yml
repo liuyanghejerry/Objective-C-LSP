@@ -119,19 +119,54 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # ── Step 1.5: Create macOS universal binary ──────────────────────────────
+  create-universal-binary:
+    needs: build-binary
+    runs-on: macos-14
+    name: Create macOS universal binary
+
+    steps:
+      - name: Download darwin-arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-darwin-arm64
+          path: binary-arm64
+
+      - name: Download darwin-x64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-darwin-x64
+          path: binary-x64
+
+      - name: Create universal binary with lipo
+        run: |
+          lipo -create binary-arm64/objc-lsp binary-x64/objc-lsp -output objc-lsp
+          file objc-lsp
+          lipo -info objc-lsp
+
+      - name: Upload universal binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-darwin-universal
+          path: objc-lsp
+          if-no-files-found: error
+          retention-days: 1
+
   # ── Step 2: Package platform-specific .vsix files ──────────────────────────
   package-vsix:
-    needs: build-binary
+    needs: [build-binary, create-universal-binary]
     runs-on: ubuntu-latest
     name: Package VSIX (${{ matrix.vsce-target }})
 
     strategy:
       matrix:
-        vsce-target:
-          - darwin-arm64
-          - darwin-x64
-          - linux-x64
-          - linux-arm64
+        include:
+          - vsce-target: darwin-arm64
+            binary-artifact: binary-darwin-universal
+          - vsce-target: linux-x64
+            binary-artifact: binary-linux-x64
+          - vsce-target: linux-arm64
+            binary-artifact: binary-linux-arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -160,7 +195,7 @@ jobs:
       - name: Download platform binary
         uses: actions/download-artifact@v4
         with:
-          name: binary-${{ matrix.vsce-target }}
+          name: ${{ matrix.binary-artifact }}
           path: ${{ env.EXTENSION_DIR }}/bin
 
       - name: Make binary executable
@@ -180,16 +215,18 @@ jobs:
 
   # ── Step 3: Package Open-VSX extension ──────────────────────────────────────
   package-ovsx:
-    needs: build-binary
+    needs: [build-binary, create-universal-binary]
     runs-on: ubuntu-latest
     name: Package Open-VSX (${{ matrix.vsce-target }})
     strategy:
       matrix:
-        vsce-target:
-          - darwin-arm64
-          - darwin-x64
-          - linux-x64
-          - linux-arm64
+        include:
+          - vsce-target: darwin-arm64
+            binary-artifact: binary-darwin-universal
+          - vsce-target: linux-x64
+            binary-artifact: binary-linux-x64
+          - vsce-target: linux-arm64
+            binary-artifact: binary-linux-arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -218,7 +255,7 @@ jobs:
       - name: Download platform binary
         uses: actions/download-artifact@v4
         with:
-          name: binary-${{ matrix.vsce-target }}
+          name: ${{ matrix.binary-artifact }}
           path: ${{ env.EXTENSION_DIR }}/bin
 
       - name: Make binary executable
@@ -320,6 +357,8 @@ jobs:
           mkdir -p release-binaries
           for dir in binary-artifacts/binary-*/; do
             platform=$(basename "$dir" | sed 's/^binary-//')
+            # Skip the universal binary — only ship platform-specific binaries for Zed
+            if [ "$platform" = "darwin-universal" ]; then continue; fi
             cp "$dir/objc-lsp" "release-binaries/objc-lsp-$platform"
           done
           ls -lh release-binaries/
