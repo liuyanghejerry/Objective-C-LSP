@@ -41,7 +41,7 @@ impl ClangIndex {
             let (unsaved_ptr, unsaved_len) = if let Some(ref content) = unsaved_content_owned {
                 unsaved_buf = CXUnsavedFile {
                     Filename: path_cstr.as_ptr(),
-                    Contents: content.as_ptr() as *const i8,
+                    Contents: content.as_ptr() as *const std::ffi::c_char,
                     Length: content.len() as u64,
                 };
                 (&unsaved_buf as *const _ as *mut _, 1u32)

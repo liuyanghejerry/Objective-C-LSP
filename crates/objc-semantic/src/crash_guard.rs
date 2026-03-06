@@ -24,13 +24,24 @@ mod imp {
     // libc on macOS does not expose sigjmp_buf / sigsetjmp / siglongjmp,
     // so we declare them ourselves.
     // On macOS arm64 sizeof(sigjmp_buf) == 196 bytes (~49 ints).
-    // Using [i32; 64] == 256 bytes gives comfortable headroom on both
-    // arm64 and x86_64 macOS without over-allocating.
+    // On Linux x86_64 sizeof(sigjmp_buf) == 200 bytes (from <bits/setjmp.h>).
+    // On Linux aarch64 sizeof(sigjmp_buf) == 280 bytes.
+    // Using [i32; 128] == 512 bytes gives comfortable headroom on all
+    // platforms without over-allocating.
 
-    type SigJmpBuf = [libc::c_int; 64];
+    type SigJmpBuf = [libc::c_int; 128];
 
     extern "C" {
+        // On Linux (glibc), `sigsetjmp` is a macro that expands to
+        // `__sigsetjmp`.  The actual symbol exported by libc is
+        // `__sigsetjmp`, so we must link against that name.
+        #[cfg(target_os = "linux")]
+        #[link_name = "__sigsetjmp"]
         fn sigsetjmp(env: *mut SigJmpBuf, savemask: libc::c_int) -> libc::c_int;
+
+        #[cfg(not(target_os = "linux"))]
+        fn sigsetjmp(env: *mut SigJmpBuf, savemask: libc::c_int) -> libc::c_int;
+
         fn siglongjmp(env: *mut SigJmpBuf, val: libc::c_int) -> !;
     }
 
@@ -105,7 +116,7 @@ mod imp {
 
         // Stack-allocate the jump buffer.  It MUST stay on this stack frame
         // for the entire duration of the guard — do not move or copy it.
-        let mut buf: SigJmpBuf = [0; 64];
+        let mut buf: SigJmpBuf = [0; 128];
 
         // Publish the pointer before arming the guard flag so the signal
         // handler always sees a valid pointer when IN_GUARD is true.

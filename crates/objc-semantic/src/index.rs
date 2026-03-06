@@ -56,7 +56,7 @@ impl ClangIndex {
             .filter_map(|a| CString::new(a.as_str()).ok())
             .collect();
 
-        let argv_ptrs: Vec<*const i8> = argv_cstrings.iter().map(|s| s.as_ptr()).collect();
+        let argv_ptrs: Vec<*const std::ffi::c_char> = argv_cstrings.iter().map(|s| s.as_ptr()).collect();
 
         let flags = CXTranslationUnit_DetailedPreprocessingRecord;
 

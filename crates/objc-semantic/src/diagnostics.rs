@@ -74,7 +74,7 @@ impl ClangIndex {
                 Ok(p) => p,
                 Err(_) => return Ok(Vec::new()),
             };
-            let argv_ptrs: Vec<*const i8> = argv_cstrings.iter().map(|s| s.as_ptr()).collect();
+            let argv_ptrs: Vec<*const std::ffi::c_char> = argv_cstrings.iter().map(|s| s.as_ptr()).collect();
 
             // Parse into a temporary TU — don't cache it.
             let flags = 0; // CXTranslationUnit_None

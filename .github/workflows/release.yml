@@ -272,7 +272,7 @@ jobs:
           cp editors/zed/extension.toml zed-extension/
           cp editors/zed/LICENSE zed-extension/
           cp -r editors/zed/languages zed-extension/
-          cp target/wasm32-wasip1/release/objc_lsp_zed.wasm zed-extension/extension.wasm
+          cp editors/zed/target/wasm32-wasip1/release/objc_lsp_zed.wasm zed-extension/extension.wasm
 
       - name: Archive Zed extension
         run: tar -czf zed-extension.tar.gz -C zed-extension .
