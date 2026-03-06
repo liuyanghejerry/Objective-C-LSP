@@ -43,9 +43,9 @@ jobs:
 
   # ── GUI tests (vscode-extension-tester, macOS only) ──────────────────────
   test-ui:
-    # GUI tests require a pre-packaged VSIX. We only run on macOS because the
-    # extension declares "platforms": ["darwin"] in package.json.
-    # On Linux xvfb-run would work but the extension itself is macOS-only.
+    # GUI tests require a pre-packaged VSIX and a display. We run on macOS
+    # because it provides a native display. On Linux xvfb-run works for unit
+    # tests but GUI tests (vscode-extension-tester) are more reliable on macOS.
     runs-on: macos-latest
     # Don't block PRs on GUI test failures — they are experimental and can be
     # flaky. We still want them to run so failures are visible.

@@ -11,8 +11,42 @@ env:
   EXTENSION_DIR: editors/vscode
 
 jobs:
+  # ── Step 0: Run tests before building anything ──────────────────────────────
+  test:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    name: Test (${{ matrix.os }})
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Select Xcode
+        if: runner.os == 'macOS'
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install libclang
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          LIBCLANG_SO=$(find /usr/lib -name 'libclang.so' -o -name 'libclang-*.so' 2>/dev/null | head -1)
+          if [ -z "$LIBCLANG_SO" ]; then
+            echo "ERROR: libclang.so not found after installing libclang-dev" >&2
+            exit 1
+          fi
+          echo "LIBCLANG_PATH=$(dirname "$LIBCLANG_SO")" >> $GITHUB_ENV
+
+      - name: Run tests
+        run: cargo test --workspace
+
   # ── Step 1: Build platform-specific Rust binaries ──────────────────────────
   build-binary:
+    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -26,10 +60,9 @@ jobs:
           - os: ubuntu-latest
             rust-target: x86_64-unknown-linux-gnu
             vsce-target: linux-x64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             rust-target: aarch64-unknown-linux-gnu
             vsce-target: linux-arm64
-            cross: true
 
     runs-on: ${{ matrix.os }}
     name: Build binary (${{ matrix.vsce-target }})
@@ -37,30 +70,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Derive version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Building version: $VERSION"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-target }}
-
-      # Linux ARM64: cross-compilation toolchain
-      - name: Install cross-compilation tools
-        if: matrix.cross
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       # macOS: ensure Xcode provides libclang
       - name: Select Xcode
         if: runner.os == 'macOS'
         run: sudo xcode-select -s /Applications/Xcode.app
 
-      # Linux: install libclang-dev
+      # Linux: install libclang-dev and set LIBCLANG_PATH
       - name: Install libclang
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libclang-dev
+          LIBCLANG_SO=$(find /usr/lib -name 'libclang.so' -o -name 'libclang-*.so' 2>/dev/null | head -1)
+          if [ -z "$LIBCLANG_SO" ]; then
+            echo "ERROR: libclang.so not found after installing libclang-dev" >&2
+            exit 1
+          fi
+          echo "LIBCLANG_PATH=$(dirname "$LIBCLANG_SO")" >> $GITHUB_ENV
+
+      # Sync Cargo.toml versions with tag
+      - name: Patch Cargo.toml versions
+        run: |
+          for toml in crates/objc-lsp/Cargo.toml crates/objc-syntax/Cargo.toml crates/objc-semantic/Cargo.toml crates/objc-intelligence/Cargo.toml crates/objc-project/Cargo.toml crates/objc-store/Cargo.toml; do
+            sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" "$toml"
+            rm -f "$toml.bak"
+          done
+          echo "Patched Cargo.toml versions to $VERSION"
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.rust-target }} -p objc-lsp
@@ -90,9 +136,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Derive version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Patch package.json version
+        working-directory: ${{ env.EXTENSION_DIR }}
+        run: npm version "$VERSION" --no-git-tag-version
 
       - name: Install extension dependencies
         working-directory: ${{ env.EXTENSION_DIR }}
@@ -133,13 +188,24 @@ jobs:
         vsce-target:
           - darwin-arm64
           - darwin-x64
+          - linux-x64
+          - linux-arm64
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Derive version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Patch package.json version
+        working-directory: ${{ env.EXTENSION_DIR }}
+        run: npm version "$VERSION" --no-git-tag-version
 
       - name: Install extension dependencies
         working-directory: ${{ env.EXTENSION_DIR }}
@@ -160,7 +226,7 @@ jobs:
 
       - name: Package Open-VSX artifact
         working-directory: ${{ env.EXTENSION_DIR }}
-        run: npx vsce package --target ${{ matrix.vsce-target }} --no-dependencies -o objc-lsp-$(node -p "require('./package.json').version")-ovsx-${{ matrix.vsce-target }}.vsix
+        run: npx vsce package --target ${{ matrix.vsce-target }} --no-dependencies -o objc-lsp-${VERSION}-ovsx-${{ matrix.vsce-target }}.vsix
 
       - name: Upload Open-VSX artifact
         uses: actions/upload-artifact@v4
@@ -172,16 +238,29 @@ jobs:
 
   # ── Step 4: Build Zed extension WASM ──────────────────────────────────────
   build-zed:
+    needs: test
     runs-on: ubuntu-latest
     name: Build Zed extension (WASM)
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Derive version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip1
+
+      # Sync Zed extension version with tag
+      - name: Patch Zed extension versions
+        run: |
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" editors/zed/extension.toml
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" editors/zed/Cargo.toml
+          echo "Patched Zed versions to $VERSION"
 
       - name: Build Zed extension
         working-directory: editors/zed
@@ -195,11 +274,14 @@ jobs:
           cp -r editors/zed/languages zed-extension/
           cp target/wasm32-wasip1/release/objc_lsp_zed.wasm zed-extension/extension.wasm
 
+      - name: Archive Zed extension
+        run: tar -czf zed-extension.tar.gz -C zed-extension .
+
       - name: Upload Zed extension artifact
         uses: actions/upload-artifact@v4
         with:
           name: zed-extension
-          path: zed-extension/
+          path: zed-extension.tar.gz
           if-no-files-found: error
           retention-days: 5
 
@@ -219,7 +301,7 @@ jobs:
           path: vsix-artifacts
           merge-multiple: true
 
-      - name: Download Open-VSX artifact
+      - name: Download Open-VSX artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: ovsx-*
@@ -246,7 +328,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: zed-extension
-          path: zed-extension
+          path: zed-artifacts
 
       - name: List release files
         run: |
@@ -257,7 +339,7 @@ jobs:
           echo '=== Binary files ==='
           ls -lh release-binaries/
           echo '=== Zed extension ==='
-          ls -lh zed-extension/
+          ls -lh zed-artifacts/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -266,6 +348,7 @@ jobs:
             vsix-artifacts/*.vsix
             ovsx-artifacts/*-ovsx-*.vsix
             release-binaries/objc-lsp-*
+            zed-artifacts/zed-extension.tar.gz
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') }}
@@ -282,3 +365,17 @@ jobs:
       #   run: vsce publish --packagePath vsix-artifacts/*.vsix
       #   env:
       #     VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      # ── Uncomment to publish to Open VSX Registry ──
+      # - uses: actions/setup-node@v4
+      #   with:
+      #     node-version: 20
+      #
+      # - name: Install ovsx
+      #   run: npm install -g ovsx
+      #
+      # - name: Publish to Open VSX
+      #   run: |
+      #     for vsix in ovsx-artifacts/*-ovsx-*.vsix; do
+      #       ovsx publish "$vsix" -p ${{ secrets.OVSX_PAT }}
+      #     done
