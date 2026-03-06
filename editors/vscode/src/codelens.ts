@@ -84,7 +84,7 @@ class ObjCCodeLensProvider implements vscode.CodeLensProvider {
           lenses.push(
             new vscode.CodeLens(range, {
               title: `$(symbol-interface) Conforms to: ${protocols.join(", ")}`,
-              command: "",
+              command: "workbench.action.focusActiveEditorGroup",
             })
           );
         }
@@ -103,7 +103,7 @@ class ObjCCodeLensProvider implements vscode.CodeLensProvider {
           lenses.push(
             new vscode.CodeLens(range, {
               title: `── ${label} ──`,
-              command: "",
+              command: "workbench.action.focusActiveEditorGroup",
             })
           );
         }
@@ -156,11 +156,11 @@ class ObjCCodeLensProvider implements vscode.CodeLensProvider {
  * Scan the document for `@interface ClassName : Super <Proto1, Proto2>`
  * and build a map of class name → protocol list.
  */
-function buildProtocolMap(
+export function buildProtocolMap(
   document: vscode.TextDocument
 ): Map<string, string[]> {
   const map = new Map<string, string[]>();
-  const regex = /@interface\s+(\w+)\s*(?::\s*\w+)?\s*<([^>]+)>/g;
+  const regex = /@interface\s+(\w+)\s*(?::\s*\w+)?\s*(?:\([^)]*\))?\s*<([^>]+)>/g;
 
   const text = document.getText();
   let match: RegExpExecArray | null;

@@ -57,7 +57,7 @@ async function addProperty(editor: vscode.TextEditor): Promise<void> {
 }
 
 /** Infer property attribute based on ObjC type conventions. */
-function inferAttribute(typeName: string, isPointer: boolean): string {
+export function inferAttribute(typeName: string, isPointer: boolean): string {
   if (!isPointer) {
     return "assign";
   }

@@ -1,6 +1,7 @@
 # Source files (not needed at runtime)
 src/
 tsconfig.json
+tsconfig.test.json
 esbuild.mjs
 package-lock.json
 
@@ -10,5 +11,10 @@ node_modules/
 # Build artifacts that shouldn't be in .vsix
 *.vsix
 .vscode-test/
+.ui-test/
+
+# Test files
+test/
+out/
 
 # dist/ and bin/ are NOT excluded — they must be packaged

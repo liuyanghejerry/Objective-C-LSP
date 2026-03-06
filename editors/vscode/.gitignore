@@ -4,3 +4,4 @@ out/
 bin/
 *.vsix
 .vscode-test/
+.ui-test/
